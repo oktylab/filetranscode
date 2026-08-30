@@ -210,7 +210,11 @@ class FfmpegEngine(Engine):
         listing = delivered.temp(suffix=".txt")
         with open(listing, "w") as handle:
             handle.writelines(f"file '{data.path}'\n" for data in ctx.input)
-        args = [BINARY, "-y", "-f", "concat", "-safe", "0", "-i", listing, "-c", "copy"]
+        # the concat demuxer refuses non-file protocols in its listed entries unless
+        # explicitly whitelisted, so a remote-URL resolver (e.g. a presigned S3 GET)
+        # needs this even though ffmpeg allows the same URL directly as a top-level -i
+        args = [BINARY, "-y", "-protocol_whitelist", "file,http,https,tcp,tls,crypto",
+                "-f", "concat", "-safe", "0", "-i", listing, "-c", "copy"]
         if format_of(format).faststart:
             args += ["-movflags", "+faststart"]
         args += ["-f", format, delivered.path]

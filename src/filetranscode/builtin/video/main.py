@@ -183,7 +183,7 @@ class VideoPipeline(Pipeline):
     #####################################################
     @node("merge", public=True)
     def merge(self, inputs: InputsLike, output: OutputLike, engine: EngineChoice = "ffmpeg") -> Any:
-        return Sequence(InputListResolver(), self.engine_operation("merge"), Set(probe="after"), self.engine_operation("probe"), self.ref("output"))
+        return Sequence(InputListResolver(self._registry, f"{self.name}.resolve"), self.engine_operation("merge"), Set(probe="after"), self.engine_operation("probe"), self.ref("output"))
 
     #####################################################
     #####################################################

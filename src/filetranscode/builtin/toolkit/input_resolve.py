@@ -2,14 +2,20 @@ import io
 import os
 import tempfile
 from contextlib import suppress
-from typing import IO, Annotated, Any, Union
+from typing import IO, Annotated, Any, ClassVar, Union
 from urllib.parse import urlsplit
 from urllib.request import url2pathname
 
 from pydantic import BaseModel, ConfigDict, PrivateAttr
 
-from ...core.core import Node
+from ...core.core import Node, Registry
 from .introspect import Role, param
+
+
+###########################################################################################################
+###########################################################################################################
+def _is_local(path: str | os.PathLike[str]) -> bool:
+    return urlsplit(os.fspath(path)).scheme not in ("http", "https")
 
 
 ###########################################################################################################
@@ -47,7 +53,7 @@ class InputData(BaseModel):
     def size(self) -> int:
         if self.raw_bytes is not None:
             return len(self.raw_bytes)
-        if self.raw_path is not None and urlsplit(os.fspath(self.raw_path)).scheme not in ("http", "https"):
+        if self.raw_path is not None and _is_local(self.raw_path):
             return os.path.getsize(self.raw_path)
         if self.raw_stream is not None:
             return self.raw_stream.seek(0, os.SEEK_END)
@@ -59,12 +65,15 @@ class InputData(BaseModel):
     def bytes_(self) -> bytes:
         if self.raw_bytes is not None:
             return self.raw_bytes
-        if self.raw_path is not None:
+        if self.raw_path is not None and _is_local(self.raw_path):
             with open(self.raw_path, "rb") as f:
                 return f.read()
         if self.raw_stream is not None:
             self.raw_stream.seek(0)
             return self.raw_stream.read()
+        if self.raw_path is not None:
+            with open(self.raw_path, "rb") as f:
+                return f.read()
         raise ValueError(f"{type(self).__name__} has no path, stream, or bytes set")
 
     #####################################################
@@ -174,18 +183,36 @@ def input_list_type(*resolvers: type[InputResolver]) -> type:
 
 ###########################################################################################################
 ###########################################################################################################
-class InputListResolver(Node):
-    async def __call__(self, ctx):
-        ctx.input = [self._data(value) for value in param(ctx, "inputs")]
-        return ctx
+class _ListItemParams(BaseModel):
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    def _data(self, value) -> InputData:
-        if isinstance(value, bytes):
-            return InputData(raw_bytes=value)
-        if hasattr(value, "read"):
-            return InputData(raw_stream=value)
-        parts = urlsplit(value)
-        return InputData(raw_path=url2pathname(parts.path) if parts.scheme == "file" else value)
+    value: Any
+    roles: ClassVar[dict[str, str]] = {"input": "value"}
+
+
+class InputListResolver(Node):
+    """Resolves each item of an `inputs` list through the same per-pipeline `resolve`
+    branch a single `input` goes through, so a plugin-registered scheme (e.g. `s3://`)
+    works for every item without any list-specific plugin code."""
+
+    def __init__(self, registry: Registry, branch_name: str) -> None:
+        self.registry = registry
+        self.branch_name = branch_name
+
+    async def __call__(self, ctx):
+        resolve = self.registry.get(self.branch_name)
+        resolved: list[InputData] = []
+        for value in param(ctx, "inputs"):
+            if isinstance(value, bytes):
+                resolved.append(InputData(raw_bytes=value))
+            elif hasattr(value, "read"):
+                resolved.append(InputData(raw_stream=value))
+            else:
+                item_ctx = ctx.model_copy(update={"params": _ListItemParams(value=value)})
+                item_ctx = await resolve(item_ctx)
+                resolved.append(item_ctx.input[0])
+        ctx.input = resolved
+        return ctx
 
 
 ###########################################################################################################
