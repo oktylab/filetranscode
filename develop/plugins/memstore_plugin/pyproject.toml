@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "filetranscode-memstore-plugin"
+version = "0.1.0"
+requires-python = ">=3.10"
+dependencies = [
+    "filetranscode",
+]
+
+[project.entry-points."filetranscode.plugins"]
+memstore = "filetranscode_memstore_plugin"
+
+[tool.setuptools.packages.find]
+where = ["src"]

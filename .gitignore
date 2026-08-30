@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+*.egg-info/
+.venv/
+build/
+dist/
+node_modules/
+develop/uitests/media/
+develop/uitests/canvas_out.txt
+develop/phototests/media/

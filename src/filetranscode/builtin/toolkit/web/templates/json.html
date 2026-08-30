@@ -1,0 +1,16 @@
+<div class="oplayout">
+<aside class="controls">
+{% include "form.html" %}
+</aside>
+<section class="work">
+<div class="spin" id="spin" hidden></div>
+<div class="ctx" id="json" hidden></div>
+<div class="tracewrap" id="tracer" hidden>
+  <div class="diagram">
+    <div class="tree card" id="trace-tree"></div>
+    <div class="side"><div class="ctx" id="trace-detail"></div></div>
+  </div>
+</div>
+</section>
+</div>
+<script>formToJson(document.getElementById("op"));</script>

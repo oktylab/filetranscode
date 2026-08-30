@@ -1,0 +1,28 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>filetranscode</title>
+<link rel="stylesheet" href="/static/style.css?v={{ version }}">
+<script src="/static/mp4demux.js?v={{ version }}"></script>
+<script src="/static/player.js?v={{ version }}"></script>
+<script src="/static/app.js?v={{ version }}"></script>
+</head>
+<body>
+<div class="shell">
+<nav>
+  <h1><a href="/">filetranscode</a></h1>
+  {% for group in groups %}
+  <h3>{{ group.name }}</h3>
+  <div class="pages">
+  {% for page in group.pages %}
+  <a href="/{{ group.name }}/{{ page }}"{% if group.name == active_group and page == active_page %} class="active"{% endif %}>{{ page }}</a>
+  {% endfor %}
+  </div>
+  {% endfor %}
+</nav>
+<main>{{ content|safe }}</main>
+</div>
+</body>
+</html>

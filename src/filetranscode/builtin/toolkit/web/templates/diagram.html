@@ -1,0 +1,8 @@
+<div class="zoombar">
+  {% for op in ops %}<button type="button" data-graph="{{ group }}.{{ op }}">{{ op }}</button>{% endfor %}
+</div>
+<div class="diagram">
+  <div class="tree card" id="tree"></div>
+  <div class="side"><div class="ctx" id="detail"></div></div>
+</div>
+<script>graphPage("{{ group }}");</script>

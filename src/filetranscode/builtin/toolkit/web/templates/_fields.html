@@ -1,0 +1,51 @@
+{% macro render(f) %}
+{% if f.kind == "file" %}
+<div class="field span2"><label>{{ f.label }}</label>
+<div class="source" data-source>
+<select data-source-toggle><option value="upload">upload</option><option value="reference">from a source</option></select>
+<label class="dropzone">
+<input type="file" name="{{ f.name }}"{% if f.multiple %} multiple{% endif %} required>
+<span class="drop-hint">drop {% if f.multiple %}files{% else %}a file{% endif %} or click to browse</span>
+<span class="drop-names"></span>
+</label>
+<input class="source-ref" name="{{ f.name }}" disabled hidden placeholder="{{ f.placeholder }}">
+</div></div>
+{% elif f.kind == "output" %}
+<div class="field"><label>result</label>
+<select data-output-toggle><option value="">download here</option><option value="destination">send to a destination</option></select>
+<input name="{{ f.name }}" disabled placeholder="{{ f.placeholder }}"></div>
+{% elif f.kind == "select" %}
+<div class="field{% if f.span2 %} span2{% endif %}"><label>{{ f.label }}</label>
+<select name="{{ f.name }}">{% if not f.selected %}<option value="">none</option>{% endif %}{% for option in f.options %}<option value="{{ option }}"{% if option == f.selected %} selected{% endif %}>{{ option }}</option>{% endfor %}</select></div>
+{% elif f.kind == "chips" %}
+<div class="field span2"><label>{{ f.label }}</label>
+<input type="hidden" name="{{ f.name }}" value="">
+<span class="chips" data-chips="{{ f.name }}">{% for option in f.options %}<label class="chip"><input type="checkbox" value="{{ option }}"><span>{{ option }}</span></label>{% endfor %}</span>
+</div>
+{% elif f.kind == "range" %}
+<div class="field"><label>{{ f.label }} <output data-for="{{ f.name }}">{{ f.default }}</output></label>
+<input type="range" name="{{ f.name }}" min="{{ f.low }}" max="{{ f.high }}" step="{{ f.step }}" value="{{ f.default }}" data-range{% if f.css %} data-css="{{ f.css }}"{% endif %}></div>
+{% elif f.kind == "dual" %}
+<div class="field"><label>{{ f.label }} <output data-dual="{{ f.min_name }}">any</output></label>
+<div class="dual">
+<input type="range" name="{{ f.min_name }}" min="{{ f.low }}" max="{{ f.high }}" step="{{ f.step }}" value="{{ f.low }}" data-range data-dual-low>
+<input type="range" name="{{ f.max_name }}" min="{{ f.low }}" max="{{ f.high }}" step="{{ f.step }}" value="{{ f.high }}" data-range data-dual-high>
+</div></div>
+{% elif f.kind == "aspect" %}
+<div class="field span2"><label>{{ f.label }}</label>
+<div class="aspects">
+<input type="hidden" name="{{ f.name }}" value="">
+<button type="button" class="ratio on" data-value=""><i style="aspect-ratio:3/2"></i>free</button>
+{% for option in f.options %}<button type="button" class="ratio" data-value="{{ option }}"><i style="aspect-ratio:{{ option.replace(':', '/') }}"></i>{{ option }}</button>{% endfor %}
+<input class="ratio-free" type="text" placeholder="W:H" spellcheck="false" size="6">
+</div></div>
+{% elif f.kind == "model" %}
+<div class="field span2"><label>{{ f.label }}</label><textarea name="{{ f.name }}" rows="2" spellcheck="false" placeholder="{{ f.placeholder }}"></textarea></div>
+{% elif f.kind == "checkbox" %}
+<div class="field"><label class="chip"><input type="checkbox" name="{{ f.name }}" value="true"><span>{{ f.label }}</span></label></div>
+{% elif f.kind == "number" %}
+<div class="field"><label>{{ f.label }}</label><input type="number" step="any" name="{{ f.name }}"></div>
+{% else %}
+<div class="field"><label>{{ f.label }}</label><input name="{{ f.name }}"{% if f.placeholder %} placeholder="{{ f.placeholder }}"{% endif %}></div>
+{% endif %}
+{% endmacro %}

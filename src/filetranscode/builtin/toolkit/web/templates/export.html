@@ -1,0 +1,39 @@
+<div class="oplayout">
+<aside class="controls">
+{% include "form.html" %}
+</aside>
+<section class="work">
+<div class="viewbar" id="viewbar" hidden>
+  <span class="seg" id="seg">
+    <button type="button" data-view="split">split</button>
+    <button type="button" data-view="side">side</button>
+  </span>
+  <a id="download" download="result" aria-label="download" class="iconlink"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg></a>
+</div>
+<div class="stage" id="stage" hidden>
+  <div class="tiles" id="inputs-grid" hidden></div>
+  <div class="tiles" id="outputs-grid" hidden></div>
+  <div class="frame" id="frame">
+    <canvas id="stagecanvas"></canvas>
+    <div class="stage-fallback" id="stage-fallback" hidden></div>
+    <div class="spin" id="spin" hidden></div>
+  </div>
+  <div class="transport" id="transport" hidden>
+    <button type="button" id="tp-play">►</button>
+    <div class="tp-track">
+      <div class="tp-markers" id="tp-markers" hidden></div>
+      <input type="range" id="tp-seek" min="0" max="1000" value="0">
+    </div>
+    <span id="tp-time">0:00.0</span>
+  </div>
+</div>
+
+<div class="tracewrap" id="tracer" hidden>
+  <div class="diagram">
+    <div class="tree card" id="trace-tree"></div>
+    <div class="side"><div class="ctx" id="trace-detail"></div></div>
+  </div>
+</div>
+</section>
+</div>
+<script>formToCompare(document.getElementById("op"));</script>

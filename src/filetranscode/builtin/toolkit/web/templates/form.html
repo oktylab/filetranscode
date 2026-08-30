@@ -1,0 +1,9 @@
+{% import "_fields.html" as fields %}
+<form id="op" method="post" action="{{ api }}" enctype="multipart/form-data" autocomplete="off" data-api="{{ api }}"{% if media %} data-media="{{ media }}"{% endif %}{% if multiple %} data-multiple="1"{% endif %}{% if multiout %} data-multiout="1"{% endif %}>
+<div class="grid">{% for f in params %}{{ fields.render(f) }}{% endfor %}</div>
+{% for section in sections %}
+<details class="section"><summary>{{ section.legend }}</summary><div class="grid">{% for f in section.fields %}{{ fields.render(f) }}{% endfor %}</div></details>
+{% endfor %}
+<button>run {{ op }}</button>
+</form>
+<div id="status"></div>
