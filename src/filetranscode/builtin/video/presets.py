@@ -54,11 +54,10 @@ class PresetIndex(Node):
 PRESETS: dict[str, VideoPreset] = {
     "facebook_video": VideoPreset(
         video_constraints=VideoConstraints(
-            aspects=["16:9", "9:16"],
-            codecs=["hevc", "h264"],
+            codecs=["h264", "hevc"],
             formats=["mp4"],
             max_bitrate=150_000_000,
-            max_fps=30,
+            max_fps=60,
             max_bytes=10_000 * MB,
             max_duration=14_400,
         ),
@@ -66,7 +65,8 @@ PRESETS: dict[str, VideoPreset] = {
     "facebook_reel": VideoPreset(
         video_constraints=VideoConstraints(
             aspects=["9:16"],
-            codecs=["hevc", "h264", "vp9", "av1"],
+            codecs=["h264", "hevc", "vp9", "av1"],
+            pix_fmts=["yuv420p", "yuvj420p"],
             formats=["mp4"],
             max_bitrate=25_000_000,
             min_fps=24,
@@ -74,6 +74,8 @@ PRESETS: dict[str, VideoPreset] = {
             max_bytes=2000 * MB,
             min_duration=3,
             max_duration=90,
+            min_width=540,
+            min_height=960,
         ),
         audio_constraints=AudioConstraints(
             codecs=["aac"],
@@ -85,14 +87,17 @@ PRESETS: dict[str, VideoPreset] = {
     "facebook_story": VideoPreset(
         video_constraints=VideoConstraints(
             aspects=["9:16"],
-            codecs=["hevc", "h264", "vp9", "av1"],
+            codecs=["h264", "hevc", "vp9", "av1"],
+            pix_fmts=["yuv420p", "yuvj420p"],
             formats=["mp4"],
             max_bitrate=25_000_000,
             min_fps=24,
             max_fps=60,
             max_bytes=4000 * MB,
             min_duration=3,
-            max_duration=90,
+            max_duration=60,
+            min_width=540,
+            min_height=960,
         ),
         audio_constraints=AudioConstraints(
             codecs=["aac"],
@@ -105,12 +110,13 @@ PRESETS: dict[str, VideoPreset] = {
         video_constraints=VideoConstraints(
             min_aspect=0.01,
             max_aspect=10.0,
-            codecs=["hevc", "h264"],
+            codecs=["h264", "hevc"],
+            pix_fmts=["yuv420p", "yuvj420p"],
             formats=["mp4"],
             max_bitrate=25_000_000,
             min_fps=23,
             max_fps=60,
-            max_bytes=1000 * MB,
+            max_bytes=300 * MB,
             min_duration=3,
             max_duration=900,
             max_width=1920,
@@ -127,7 +133,8 @@ PRESETS: dict[str, VideoPreset] = {
         video_constraints=VideoConstraints(
             min_aspect=0.1,
             max_aspect=10.0,
-            codecs=["hevc", "h264"],
+            codecs=["h264", "hevc"],
+            pix_fmts=["yuv420p", "yuvj420p"],
             formats=["mp4"],
             max_bitrate=25_000_000,
             min_fps=23,
@@ -166,7 +173,7 @@ PRESETS: dict[str, VideoPreset] = {
         video_constraints=VideoConstraints(
             min_aspect=0.5,
             max_aspect=1.91,
-            codecs=["hevc", "h264"],
+            codecs=["h264", "hevc"],
             formats=["mp4"],
             max_bitrate=150_000_000,
             min_fps=24,
@@ -193,7 +200,8 @@ PRESETS: dict[str, VideoPreset] = {
         video_constraints=VideoConstraints(
             min_aspect=0.01,
             max_aspect=10.0,
-            codecs=["hevc", "h264"],
+            codecs=["h264", "hevc"],
+            pix_fmts=["yuv420p", "yuvj420p"],
             formats=["mp4"],
             max_bitrate=25_000_000,
             min_fps=23,
@@ -211,8 +219,7 @@ PRESETS: dict[str, VideoPreset] = {
     ),
     "tiktok_video": VideoPreset(
         video_constraints=VideoConstraints(
-            aspects=["9:16", "16:9"],
-            codecs=["hevc", "h264"],
+            codecs=["h264", "hevc"],
             formats=["mp4"],
             max_bitrate=150_000_000,
             min_fps=23,
@@ -231,12 +238,13 @@ PRESETS: dict[str, VideoPreset] = {
             min_aspect=0.3333,
             max_aspect=3.0,
             codecs=["h264"],
+            pix_fmts=["yuv420p", "yuvj420p"],
             formats=["mp4"],
             max_bitrate=150_000_000,
             max_fps=60,
             max_bytes=512 * MB,
             min_duration=0.5,
-            max_duration=140,
+            max_duration=1200,
             max_width=1280,
             max_height=1024,
         ),
@@ -246,7 +254,7 @@ PRESETS: dict[str, VideoPreset] = {
     ),
     "youtube_video": VideoPreset(
         video_constraints=VideoConstraints(
-            codecs=["hevc", "h264"],
+            codecs=["h264", "hevc"],
             formats=["mp4"],
             max_bitrate=150_000_000,
             max_fps=60,
@@ -255,8 +263,8 @@ PRESETS: dict[str, VideoPreset] = {
     ),
     "youtube_short": VideoPreset(
         video_constraints=VideoConstraints(
-            aspects=["9:16"],
-            codecs=["hevc", "h264"],
+            max_aspect=1.0,
+            codecs=["h264", "hevc"],
             formats=["mp4"],
             max_bitrate=150_000_000,
             max_fps=60,

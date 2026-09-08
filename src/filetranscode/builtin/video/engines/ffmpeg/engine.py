@@ -5,6 +5,7 @@ import shutil
 import subprocess
 import tempfile
 from glob import glob
+from urllib.parse import urlsplit
 
 from .....exceptions import EngineError, ProbeError
 from ....toolkit.engine import Engine, operation, probing
@@ -46,6 +47,15 @@ def _display(width: int, height: int, sar_text: str | None, rotation: int) -> tu
 
 ###########################################################################################################
 ###########################################################################################################
+NETWORK_INPUT_ARGS = ["-reconnect", "1", "-reconnect_streamed", "1", "-reconnect_on_network_error", "1", "-reconnect_delay_max", "5", "-rw_timeout", "30000000"]
+
+
+def _input_args(path: str) -> list[str]:
+    return list(NETWORK_INPUT_ARGS) if urlsplit(path).scheme in ("http", "https") else []
+
+
+###########################################################################################################
+###########################################################################################################
 class FfmpegEngine(Engine):
     #####################################################
     #####################################################
@@ -59,7 +69,7 @@ class FfmpegEngine(Engine):
     async def _measured_duration(self, path: str) -> float | None:
         result = await asyncio.to_thread(
             subprocess.run,
-            [PROBE_BINARY, "-v", "error", "-read_intervals", "99999999%", "-show_entries", "packet=pts_time,duration_time", "-of", "csv=p=0", path],
+            [PROBE_BINARY, "-v", "error", "-read_intervals", "99999999%", "-show_entries", "packet=pts_time,duration_time", "-of", "csv=p=0", *_input_args(path), path],
             capture_output=True, text=True,
         )
         ends = []
@@ -74,7 +84,7 @@ class FfmpegEngine(Engine):
     async def _measured_audio_bps(self, path: str, duration: float) -> int | None:
         result = await asyncio.to_thread(
             subprocess.run,
-            [PROBE_BINARY, "-v", "error", "-select_streams", "a", "-show_entries", "packet=size", "-of", "csv=p=0", path],
+            [PROBE_BINARY, "-v", "error", "-select_streams", "a", "-show_entries", "packet=size", "-of", "csv=p=0", *_input_args(path), path],
             capture_output=True, text=True,
         )
         total = sum(int(line) for line in result.stdout.splitlines() if line.isdigit())
@@ -83,7 +93,7 @@ class FfmpegEngine(Engine):
     async def _probe(self, source) -> VideoMetadata:
         result = await asyncio.to_thread(
             subprocess.run,
-            [PROBE_BINARY, "-v", "error", "-print_format", "json", "-show_streams", "-show_format", "-show_entries", "stream_side_data_list", source.path],
+            [PROBE_BINARY, "-v", "error", "-print_format", "json", "-show_streams", "-show_format", "-show_entries", "stream_side_data_list", *_input_args(source.path), source.path],
             capture_output=True, text=True,
         )
         if result.returncode:
@@ -138,7 +148,7 @@ class FfmpegEngine(Engine):
         args = [BINARY, "-y"]
         if plan.trim_start:
             args += ["-ss", f"{plan.trim_start:g}"]
-        args += ["-i", ctx.input[0].path]
+        args += [*_input_args(ctx.input[0].path), "-i", ctx.input[0].path]
         if plan.trim_end is not None:
             args += ["-t", f"{(plan.trim_end - (plan.trim_start or 0)) / plan.speed:g}"]
         filters = video_filters(plan, metadata)
@@ -163,7 +173,7 @@ class FfmpegEngine(Engine):
     @operation
     async def remux(self, ctx):
         plan, metadata = ctx.plan, ctx.metadata.before[0]
-        args = [BINARY, "-y", "-i", ctx.input[0].path, "-map", "0:v:0", "-c:v", "copy"]
+        args = [BINARY, "-y", *_input_args(ctx.input[0].path), "-i", ctx.input[0].path, "-map", "0:v:0", "-c:v", "copy"]
         if metadata.audio:
             args += ["-map", "0:a:0"]
         args += self._audio_args(plan, metadata)
@@ -184,7 +194,7 @@ class FfmpegEngine(Engine):
         try:
             pattern = os.path.join(workdir, f"chunk_%03d.{extension}")
             await _run([
-                BINARY, "-y", "-i", ctx.input[0].path, "-map", "0", "-c", "copy",
+                BINARY, "-y", *_input_args(ctx.input[0].path), "-i", ctx.input[0].path, "-map", "0", "-c", "copy",
                 "-f", "segment", "-segment_time", str(ctx.params.chunk_seconds),
                 "-segment_format", format, "-reset_timestamps", "1", pattern,
             ])
@@ -204,7 +214,7 @@ class FfmpegEngine(Engine):
     #####################################################
     @operation
     async def merge(self, ctx):
-        sniff = await asyncio.to_thread(subprocess.run, [PROBE_BINARY, "-v", "error", "-show_entries", "format=format_name", "-of", "csv=p=0", ctx.input[0].path], capture_output=True, text=True)
+        sniff = await asyncio.to_thread(subprocess.run, [PROBE_BINARY, "-v", "error", "-show_entries", "format=format_name", "-of", "csv=p=0", *_input_args(ctx.input[0].path), ctx.input[0].path], capture_output=True, text=True)
         format, _ = segment_format(sniff.stdout.strip())
         delivered = OutputData()
         listing = delivered.temp(suffix=".txt")

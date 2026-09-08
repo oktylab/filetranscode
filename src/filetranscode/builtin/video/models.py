@@ -53,6 +53,7 @@ class AudioConstraints(Model):
 ###########################################################################################################
 class VideoConstraints(Model):
     codecs: list[str] = Field(default=["h264"], min_length=1, json_schema_extra=ui(choices_branch="video.rate", exclude=["default"]))
+    pix_fmts: list[str] | None = Field(default=None, json_schema_extra=ui(choices=["yuv420p", "yuvj420p", "yuv422p", "yuv444p", "yuv420p10le", "yuv422p10le", "yuv444p10le"]))
     formats: list[str] = Field(default=["mp4"], min_length=1)
     min_width: int | None = Field(default=None, json_schema_extra=ui(widget="range", low=0, high=7680, step=2))
     max_width: int | None = Field(default=None, json_schema_extra=ui(widget="range", low=0, high=7680, step=2))

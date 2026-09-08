@@ -63,13 +63,12 @@ PRESETS: dict[str, PhotoPreset] = {
     "facebook_story": PhotoPreset(
         photo_constraints=PhotoConstraints(
             formats=["jpeg", "png", "gif", "bmp", "tiff"],
-            max_bytes=4 * MB,
+            max_bytes=10 * MB,
         ),
     ),
     "facebook_thumbnail": PhotoPreset(
         photo_constraints=PhotoConstraints(
             formats=["jpeg", "png"],
-            aspects=["9:16"],
             max_bytes=10 * MB,
         ),
     ),
@@ -108,9 +107,6 @@ PRESETS: dict[str, PhotoPreset] = {
     "linkedin_thumbnail": PhotoPreset(
         photo_constraints=PhotoConstraints(
             formats=["jpeg"],
-            min_width=600,
-            max_width=1920,
-            max_height=1080,
             max_bytes=5 * MB,
         ),
     ),
@@ -121,16 +117,12 @@ PRESETS: dict[str, PhotoPreset] = {
             min_height=900,
             max_width=2000,
             max_height=3000,
-            aspects=["2:3"],
             max_bytes=20 * MB,
         ),
     ),
     "pinterest_thumbnail": PhotoPreset(
         photo_constraints=PhotoConstraints(
             formats=["jpeg"],
-            min_width=600,
-            max_width=1000,
-            max_height=1500,
             max_bytes=10 * MB,
         ),
     ),
@@ -143,9 +135,6 @@ PRESETS: dict[str, PhotoPreset] = {
     "snapchat_thumbnail": PhotoPreset(
         photo_constraints=PhotoConstraints(
             formats=["jpeg"],
-            min_width=720,
-            max_width=1080,
-            max_height=1920,
             max_bytes=5 * MB,
         ),
     ),
@@ -163,9 +152,6 @@ PRESETS: dict[str, PhotoPreset] = {
     "threads_thumbnail": PhotoPreset(
         photo_constraints=PhotoConstraints(
             formats=["jpeg"],
-            min_width=640,
-            max_width=1080,
-            max_height=1350,
             max_bytes=8 * MB,
         ),
     ),
@@ -174,15 +160,13 @@ PRESETS: dict[str, PhotoPreset] = {
             formats=["jpeg"],
             max_width=1920,
             max_height=1920,
+            max_pixels=1920 * 1080,
             max_bytes=20 * MB,
         ),
     ),
     "tiktok_thumbnail": PhotoPreset(
         photo_constraints=PhotoConstraints(
             formats=["jpeg"],
-            min_width=720,
-            max_width=1080,
-            max_height=1920,
             max_bytes=5 * MB,
         ),
     ),
@@ -199,9 +183,6 @@ PRESETS: dict[str, PhotoPreset] = {
     "twitter_thumbnail": PhotoPreset(
         photo_constraints=PhotoConstraints(
             formats=["jpeg"],
-            min_width=600,
-            max_width=1280,
-            max_height=720,
             max_bytes=5 * MB,
         ),
     ),

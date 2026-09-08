@@ -33,6 +33,9 @@ class PlanCodec(Node):
         )
         if codec != metadata.codec:
             ctx.plan.reasons.video.append("codec")
+        if limits.pix_fmts and metadata.pix_fmt not in limits.pix_fmts:
+            ctx.plan.pix_fmt = limits.pix_fmts[0]
+            ctx.plan.reasons.video.append("pix_fmt")
         return ctx
 
 
