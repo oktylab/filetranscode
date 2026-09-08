@@ -51,6 +51,27 @@ class PresetIndex(Node):
 
 ###########################################################################################################
 ###########################################################################################################
+_TWITTER_VIDEO = dict(
+    min_aspect=0.3333,
+    max_aspect=3.0,
+    codecs=["h264"],
+    pix_fmts=["yuv420p", "yuvj420p"],
+    formats=["mp4"],
+    max_bitrate=150_000_000,
+    max_fps=60,
+    min_duration=0.5,
+    max_width=1280,
+    max_height=1024,
+)
+
+_YOUTUBE_VIDEO = dict(
+    codecs=["h264", "hevc"],
+    formats=["mp4"],
+    max_bitrate=150_000_000,
+    max_fps=60,
+    max_bytes=256_000 * MB,
+)
+
 PRESETS: dict[str, VideoPreset] = {
     "facebook_video": VideoPreset(
         video_constraints=VideoConstraints(
@@ -233,33 +254,23 @@ PRESETS: dict[str, VideoPreset] = {
             max_height=4096,
         ),
     ),
+    # X: default accounts post up to 20 min / 8 GB, Premium or verified accounts up to 125 min / 16 GB
+    # (docs.x.com media introduction, "size and duration limits"); everything else is shared.
     "twitter_video": VideoPreset(
-        video_constraints=VideoConstraints(
-            min_aspect=0.3333,
-            max_aspect=3.0,
-            codecs=["h264"],
-            pix_fmts=["yuv420p", "yuvj420p"],
-            formats=["mp4"],
-            max_bitrate=150_000_000,
-            max_fps=60,
-            max_bytes=512 * MB,
-            min_duration=0.5,
-            max_duration=1200,
-            max_width=1280,
-            max_height=1024,
-        ),
-        audio_constraints=AudioConstraints(
-            max_channels=2,
-        ),
+        video_constraints=VideoConstraints(**_TWITTER_VIDEO, max_bytes=8000 * MB, max_duration=1200),
+        audio_constraints=AudioConstraints(max_channels=2),
     ),
+    "twitter_video_premium": VideoPreset(
+        video_constraints=VideoConstraints(**_TWITTER_VIDEO, max_bytes=16_000 * MB, max_duration=7500),
+        audio_constraints=AudioConstraints(max_channels=2),
+    ),
+    # YouTube: 256 GB or 12 hours; a channel without verified long uploads is capped at 15 minutes
+    # (support.google.com/youtube/answer/71673, channel status.longUploadsStatus).
     "youtube_video": VideoPreset(
-        video_constraints=VideoConstraints(
-            codecs=["h264", "hevc"],
-            formats=["mp4"],
-            max_bitrate=150_000_000,
-            max_fps=60,
-            max_bytes=4000 * MB,
-        ),
+        video_constraints=VideoConstraints(**_YOUTUBE_VIDEO, max_duration=43_200),
+    ),
+    "youtube_video_unverified": VideoPreset(
+        video_constraints=VideoConstraints(**_YOUTUBE_VIDEO, max_duration=900),
     ),
     "youtube_short": VideoPreset(
         video_constraints=VideoConstraints(

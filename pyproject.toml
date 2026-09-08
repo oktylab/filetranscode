@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "filetranscode"
-version = "0.1.0"
+version = "0.1.1"
 description = "A pluggable, typed pipeline engine for media (and any other file) processing"
 license = {text = "MIT"}
 readme = "README.md"
