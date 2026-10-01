@@ -79,6 +79,13 @@ class ImageMagickEngine(Engine):
             if orientation in SWAPPED_ORIENTATIONS:
                 width, height = height, width
             animated = len(lines) > 1
+            alpha = alpha_text in ("True", "Blend")
+            if alpha and not animated:
+                # -ping reports the alpha trait only; a fully opaque alpha channel carries no transparency
+                opaque = await asyncio.to_thread(
+                    subprocess.run, [BINARY, "identify", "-format", "%[opaque]", data.path], capture_output=True, text=True,
+                )
+                alpha = not (opaque.returncode == 0 and opaque.stdout.strip().lower() == "true")
             try:
                 ticks = sum(int(line.split(",", 6)[5]) for line in lines)
             except (ValueError, IndexError) as error:
@@ -91,7 +98,7 @@ class ImageMagickEngine(Engine):
                 animated=animated,
                 frames=len(lines),
                 duration=ticks / 100 if animated else None,
-                alpha=alpha_text in ("True", "Blend"),
+                alpha=alpha,
                 icc=icc_text.strip() or None,
                 size=data.size,
             ))

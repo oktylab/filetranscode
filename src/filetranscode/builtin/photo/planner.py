@@ -97,38 +97,59 @@ class PlanCrop(Node):
 ###########################################################################################################
 class PlanGeometry(Node):
     async def __call__(self, ctx):
-        plan, limits, metadata = ctx.plan, param(ctx, "config").photo_constraints, ctx.metadata.before[0]
-        width, height = plan.width, plan.height
-        down = min((limits.max_width or width) / width, (limits.max_height or height) / height, 1.0)
-        if limits.max_pixels and width * height * down * down > limits.max_pixels:
-            down = math.sqrt(limits.max_pixels / (width * height))
-        demand = "the maximum size constraints"
-        if limits.max_bytes:
-            frames = metadata.frames if metadata.animated and not plan.still else 1
-            budget = limits.max_bytes * SIZE_MARGIN
-            pixels = width * height * down * down * frames
-            traits = format_of(plan.format)
-            landing = 1.0 if traits.lossy else math.sqrt(traits.landing)
-            if density_of(plan.format, metadata, floor=True) * pixels * landing > budget:
-                overshoot = budget / (density_of(plan.format, metadata) * pixels * landing)
-                byte_scale = overshoot ** (1 / bytes_scale_exponent(plan.format, metadata))
-                if byte_scale < 1.0:
-                    down *= byte_scale
-                    demand = f"max_bytes={limits.max_bytes}"
-        up = max((limits.min_width or width) / width, (limits.min_height or height) / height, 1.0)
-        if down < 1.0 and up > 1.0:
-            raise UnsatisfiableError(f"{width}x{height} cannot satisfy both the minimum size constraints and {demand} at once")
-        scale = down if down < 1.0 else up
-        fit = math.floor if scale < 1.0 else math.ceil
-        fitted = fit(width * scale), fit(height * scale)
-        if min(fitted) < MIN_DIMENSION:
-            raise UnsatisfiableError(f"fitting {demand} would shrink {width}x{height} below {MIN_DIMENSION}px; the constraints are unsatisfiable")
-        if (limits.min_width and fitted[0] < limits.min_width) or (limits.min_height and fitted[1] < limits.min_height):
-            raise UnsatisfiableError(f"{width}x{height} cannot satisfy both the minimum size constraints and {demand} at once")
-        if fitted != (width, height):
+        plan, config, metadata = ctx.plan, param(ctx, "config"), ctx.metadata.before[0]
+        limits = config.photo_constraints
+        try:
+            fitted = _fit(plan, limits, metadata)
+        except UnsatisfiableError:
+            # A lossless format whose byte cap forces it below the minimum size gets one retry in an allowed
+            # lossy format (alpha is flattened later by PlanAlpha) before the export is declared unsatisfiable.
+            keeps_alpha = metadata.alpha and config.edits.background is None
+            lossy = sorted((name for name in limits.formats if format_of(name).lossy), key=lambda name: not (keeps_alpha and format_of(name).alpha))
+            if not lossy or format_of(plan.format).lossy or (metadata.animated and not plan.still):
+                raise
+            plan.format, plan.options = lossy[0], dict(format_of(lossy[0]).options)
+            if "format" not in plan.reasons:
+                plan.reasons.append("format")
+            fitted = _fit(plan, limits, metadata)
+        if fitted != (plan.width, plan.height):
             plan.width, plan.height = fitted
             plan.reasons.append("resolution")
         return ctx
+
+
+def _fit(plan, limits, metadata) -> tuple[int, int]:
+    width, height = plan.width, plan.height
+    down = min((limits.max_width or width) / width, (limits.max_height or height) / height, 1.0)
+    if limits.max_pixels and width * height * down * down > limits.max_pixels:
+        down = math.sqrt(limits.max_pixels / (width * height))
+    demand = "the maximum size constraints"
+    # The source's real size beats any density estimate: same format at the same geometry already fits.
+    source_fits = bool(limits.max_bytes and metadata.size) and plan.format == metadata.format \
+        and (width, height) == (metadata.width, metadata.height) and metadata.size <= limits.max_bytes * SIZE_MARGIN
+    if limits.max_bytes and not (down == 1.0 and source_fits):
+        frames = metadata.frames if metadata.animated and not plan.still else 1
+        budget = limits.max_bytes * SIZE_MARGIN
+        pixels = width * height * down * down * frames
+        traits = format_of(plan.format)
+        landing = 1.0 if traits.lossy else math.sqrt(traits.landing)
+        if density_of(plan.format, metadata, floor=True) * pixels * landing > budget:
+            overshoot = budget / (density_of(plan.format, metadata) * pixels * landing)
+            byte_scale = overshoot ** (1 / bytes_scale_exponent(plan.format, metadata))
+            if byte_scale < 1.0:
+                down *= byte_scale
+                demand = f"max_bytes={limits.max_bytes}"
+    up = max((limits.min_width or width) / width, (limits.min_height or height) / height, 1.0)
+    if down < 1.0 and up > 1.0:
+        raise UnsatisfiableError(f"{width}x{height} cannot satisfy both the minimum size constraints and {demand} at once")
+    scale = down if down < 1.0 else up
+    fit = math.floor if scale < 1.0 else math.ceil
+    fitted = fit(width * scale), fit(height * scale)
+    if min(fitted) < MIN_DIMENSION:
+        raise UnsatisfiableError(f"fitting {demand} would shrink {width}x{height} below {MIN_DIMENSION}px; the constraints are unsatisfiable")
+    if (limits.min_width and fitted[0] < limits.min_width) or (limits.min_height and fitted[1] < limits.min_height):
+        raise UnsatisfiableError(f"{width}x{height} cannot satisfy both the minimum size constraints and {demand} at once")
+    return fitted
 
 
 ###########################################################################################################

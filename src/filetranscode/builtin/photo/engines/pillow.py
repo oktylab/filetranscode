@@ -78,6 +78,16 @@ def profile_description(icc_bytes: bytes) -> str:
 
 ###########################################################################################################
 ###########################################################################################################
+def has_transparency(img: Image.Image, animated: bool) -> bool:
+    # An alpha channel that is fully opaque carries no transparency; reporting it as alpha would pin
+    # the export to alpha-capable (often lossless) formats for nothing. Animated frames are not scanned.
+    if img.mode in ("RGBA", "LA") and not animated:
+        return img.getchannel("A").getextrema()[0] < 255
+    return img.mode in ("RGBA", "LA", "PA") or "transparency" in img.info
+
+
+###########################################################################################################
+###########################################################################################################
 class PillowEngine(Engine):
     #####################################################
     #####################################################
@@ -104,7 +114,7 @@ class PillowEngine(Engine):
                         animated=animated,
                         frames=frames,
                         duration=duration,
-                        alpha=img.mode in ("RGBA", "LA", "PA") or "transparency" in img.info,
+                        alpha=has_transparency(img, animated),
                         icc=profile_description(icc) if icc else None,
                         size=data.size,
                     ))
