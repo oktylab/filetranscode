@@ -12,6 +12,10 @@ from ..toolkit.introspect import param
 from ..toolkit.output_resolve import OutputData
 from .rate import traits_of
 
+# A trim end that overshoots the probed duration by under a frame (or this many seconds) means "the end":
+# probes round durations (ffprobe prints 6 decimals) and clients read them from a different stream or clock.
+TRIM_END_SLACK = 0.1
+
 
 ###########################################################################################################
 ###########################################################################################################
@@ -168,6 +172,8 @@ class PlanEdits(Node):
             raise UnsatisfiableError("trim_end is required when the source reports no duration")
         if end <= start:
             raise UnsatisfiableError(f"trim range [{start:g}s, {end:g}s] is empty")
+        if duration and end > duration and end - duration <= max(1 / metadata.fps if metadata.fps else 0.0, TRIM_END_SLACK):
+            end = duration
         if duration and (start >= duration or end > duration):
             raise UnsatisfiableError(f"trim range [{start:g}s, {end:g}s] exceeds the source duration {duration:g}s")
         plan.trim_start, plan.trim_end = start, end
