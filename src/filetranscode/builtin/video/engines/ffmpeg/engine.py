@@ -74,7 +74,7 @@ class FfmpegEngine(Engine):
         )
         ends = []
         for line in result.stdout.splitlines():
-            pts, _, duration = line.partition(",")
+            pts, duration = (line.split(",") + [""])[:2]
             try:
                 ends.append(float(pts) + (float(duration) if duration and duration != "N/A" else 0.0))
             except ValueError:
@@ -131,9 +131,12 @@ class FfmpegEngine(Engine):
                 sample_rate=int(audio["sample_rate"]) if audio.get("sample_rate") else None,
             ) if audio else None,
         )
+        # The packet scan refines coarse or missing header durations (matroska rounds to ms) but must not exceed the
+        # container's presentation length: an MP4 edit list trims the last AAC frame's padding, which packets still carry.
         measured = await self._measured_duration(source.path)
+        declared = float(container.get("duration") or 0) or None
         if measured:
-            metadata = metadata.model_copy(update={"duration": measured})
+            metadata = metadata.model_copy(update={"duration": min(measured, declared) if declared else measured})
         if metadata.audio and metadata.audio.bitrate is None and metadata.duration:
             bps = await self._measured_audio_bps(source.path, metadata.duration)
             if bps:

@@ -172,7 +172,7 @@ class PyAvEngine(Engine):
             )
             measured = _measured_duration(container)
             if measured:
-                metadata = metadata.model_copy(update={"duration": measured})
+                metadata = metadata.model_copy(update={"duration": min(measured, metadata.duration) if metadata.duration else measured})
         if metadata.audio and metadata.audio.bitrate is None and metadata.duration:
             bps = _measured_audio_bps(data, metadata.duration)
             if bps:
