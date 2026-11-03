@@ -241,6 +241,7 @@ PRESETS: dict[str, VideoPreset] = {
     "tiktok_video": VideoPreset(
         video_constraints=VideoConstraints(
             codecs=["h264", "hevc"],
+            pix_fmts=["yuv420p", "yuvj420p"],
             formats=["mp4"],
             max_bitrate=150_000_000,
             min_fps=23,
