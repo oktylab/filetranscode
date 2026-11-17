@@ -112,7 +112,9 @@ class FfmpegEngine(Engine):
         video = videos[0]
         audio = next((s for s in streams if s.get("codec_type") == "audio"), None)
         container = data.get("format", {})
-        numerator, denominator = video.get("r_frame_rate", "0/0").split("/")
+        # the declared rate is the most the stream plays at; a lower average means frames are missing (a variable
+        # rate phone clip declaring 30/1 that averages 20), and platforms check the frames that are there
+        rates = [int(n) / int(d) for n, d in (video.get(key, "0/0").split("/") for key in ("r_frame_rate", "avg_frame_rate")) if int(d)]
         rotation = next((int(float(side.get("rotation", 0))) for side in video.get("side_data_list", []) if "rotation" in side), 0) % 360
         width, height = _display(video["width"], video["height"], video.get("sample_aspect_ratio"), rotation)
         metadata = VideoMetadata(
@@ -123,7 +125,7 @@ class FfmpegEngine(Engine):
             height=height,
             rotation=rotation,
             sar=_sar(video.get("sample_aspect_ratio")),
-            fps=int(numerator) / int(denominator) if int(denominator or 0) else None,
+            fps=min(rates, default=None),
             duration=float(video.get("duration") or container.get("duration") or 0) or None,
             frame_count=int(video["nb_frames"]) if str(video.get("nb_frames", "")).isdigit() else None,
             bitrate=int(video.get("bit_rate") or container.get("bit_rate") or 0) or None,
