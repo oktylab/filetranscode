@@ -28,6 +28,8 @@ CLIPS = {
     # name: (size, fps, seconds, extra encoder args); the GOP lengths put the keyframe cuts off chunk_seconds
     "h264_bf": ("1280x720", 30, 20, ["-c:v", "libx264", "-preset", "veryfast", "-g", "90"]),
     "h264_nobf": ("1280x720", 30, 20, ["-c:v", "libx264", "-preset", "veryfast", "-g", "91", "-bf", "0"]),
+    # an iPhone style 59.94 fps track on a 600 timescale: the chunks' probed rates differ from the plan's, so only some take the fps filter
+    "h264_ntsc60_ts600": ("1280x720", "60000/1001", 12, ["-c:v", "libx264", "-preset", "veryfast", "-g", "45", "-video_track_timescale", "600"]),
     "hevc_4k60": ("3840x2160", 60, 30, ["-c:v", "libx265", "-preset", "ultrafast", "-g", "300", "-x265-params", "log-level=error", "-tag:v", "hvc1"]),
 }
 
@@ -48,6 +50,7 @@ CASES = [
     ("h264_nobf", 4, ["h264"], None, None, 1.5),
     ("h264_nobf", 4, ["h264"], 3.0, 17.0, 1.5),
     ("h264_nobf", 4, ["h264"], None, None, 0.75),
+    ("h264_ntsc60_ts600", 3, ["hevc"], None, None, 1.0),
     ("hevc_4k60", 8, ["h264"], None, None, 1.0),
     ("hevc_4k60", 8, ["h264"], 4.25, 22.5, 1.0),
     ("hevc_4k60", 8, ["hevc"], 4.25, 22.5, 1.5),
@@ -152,7 +155,9 @@ async def run_case(pipe, source: str, workdir: str, label: str, chunk_seconds: f
     first_got = frames(actual, 0, 0, got["width"], got["height"])[0]
     first_want = frames(expected, 0, 0, want["width"], want["height"])[0]
     index, score = nearest(first_got, candidates, max(first_index - 2, 0))
-    check(f"{label} first frame is source frame {first_index}", index == first_index and score >= 28, f"nearest source frame {index} at {score:.1f} dB")
+    # the floor is what the single pass itself reaches on that frame (a default hevc encode of testsrc2 sits near 24 dB)
+    floor = min(28, nearest(first_want, candidates, 0)[1] - 1)
+    check(f"{label} first frame is source frame {first_index}", index == first_index and score >= floor, f"nearest source frame {index} at {score:.1f} dB")
     check(f"{label} first frame matches export", psnr(first_got, first_want) >= 28, f"{psnr(first_got, first_want):.1f} dB")
     last_got = frames(actual, got["frames"] - 1, got["frames"] - 1, got["width"], got["height"])[0]
     last_want = frames(expected, want["frames"] - 1, want["frames"] - 1, want["width"], want["height"])[0]
@@ -161,7 +166,7 @@ async def run_case(pipe, source: str, workdir: str, label: str, chunk_seconds: f
         last_index = round((end if end is not None else probe(source)["duration"]) * fps) - 1
         candidates = frames(source, last_index - 2, last_index + 2, want["width"], want["height"])
         index, score = nearest(last_got, candidates, last_index - 2)
-        check(f"{label} last frame is source frame {last_index}", index == last_index and score >= 28, f"nearest source frame {index} at {score:.1f} dB")
+        check(f"{label} last frame is source frame {last_index}", index == last_index and score >= min(28, nearest(last_want, candidates, 0)[1] - 1), f"nearest source frame {index} at {score:.1f} dB")
     separate = await split_export_merge(pipe, source, workdir, label, config, chunk_seconds)
     split_probe = probe(separate)
     for key in ("codec", "width", "height", "pix_fmt", "fps", "frames"):

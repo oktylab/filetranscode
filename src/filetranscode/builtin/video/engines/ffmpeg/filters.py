@@ -1,3 +1,5 @@
+from fractions import Fraction
+
 from ...css import avfilter_stages
 from ...models import atempo_factors
 
@@ -16,7 +18,8 @@ def video_filters(plan, metadata) -> list[str]:
     if plan.speed != 1.0:
         steps.append(f"setpts=PTS/{plan.speed:g}")
     if plan.fps and (plan.fps != metadata.fps or plan.speed != 1.0):
-        steps.append(f"fps={plan.fps:g}")
+        # an exact rate (60000/1001, not the 59.9401 :g prints), so every fanout chunk gets the time base the unfiltered ones keep
+        steps.append(f"fps={Fraction(plan.fps).limit_denominator(1001)}")
     steps += [f"{name}={escape(args)}" for name, args in avfilter_stages(plan.color, plan.height, plan.pix_fmt, metadata)]
     return steps
 
