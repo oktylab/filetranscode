@@ -120,7 +120,8 @@ class PlanGeometry(Node):
 
 def _fit(plan, limits, metadata) -> tuple[int, int]:
     width, height = plan.width, plan.height
-    down = min((limits.max_width or width) / width, (limits.max_height or height) / height, 1.0)
+    short, long = min(width, height), max(width, height)
+    down = min((limits.max_width or width) / width, (limits.max_height or height) / height, (limits.max_short_side or short) / short, (limits.max_long_side or long) / long, 1.0)
     if limits.max_pixels and width * height * down * down > limits.max_pixels:
         down = math.sqrt(limits.max_pixels / (width * height))
     demand = "the maximum size constraints"
@@ -139,7 +140,7 @@ def _fit(plan, limits, metadata) -> tuple[int, int]:
             if byte_scale < 1.0:
                 down *= byte_scale
                 demand = f"max_bytes={limits.max_bytes}"
-    up = max((limits.min_width or width) / width, (limits.min_height or height) / height, 1.0)
+    up = max((limits.min_width or width) / width, (limits.min_height or height) / height, (limits.min_short_side or short) / short, (limits.min_long_side or long) / long, 1.0)
     if down < 1.0 and up > 1.0:
         raise UnsatisfiableError(f"{width}x{height} cannot satisfy both the minimum size constraints and {demand} at once")
     scale = down if down < 1.0 else up
@@ -147,7 +148,8 @@ def _fit(plan, limits, metadata) -> tuple[int, int]:
     fitted = fit(width * scale), fit(height * scale)
     if min(fitted) < MIN_DIMENSION:
         raise UnsatisfiableError(f"fitting {demand} would shrink {width}x{height} below {MIN_DIMENSION}px; the constraints are unsatisfiable")
-    if (limits.min_width and fitted[0] < limits.min_width) or (limits.min_height and fitted[1] < limits.min_height):
+    if (limits.min_width and fitted[0] < limits.min_width) or (limits.min_height and fitted[1] < limits.min_height) \
+            or (limits.min_short_side and min(fitted) < limits.min_short_side) or (limits.min_long_side and max(fitted) < limits.min_long_side):
         raise UnsatisfiableError(f"{width}x{height} cannot satisfy both the minimum size constraints and {demand} at once")
     return fitted
 

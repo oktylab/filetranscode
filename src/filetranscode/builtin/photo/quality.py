@@ -67,7 +67,8 @@ class SizeRetry(Node):
             scale = min(needed, 1.0) ** (1 / bytes_scale_exponent(ctx.plan.format, ctx.metadata.before[0]))
             width, height = round(ctx.plan.width * scale), round(ctx.plan.height * scale)
             limits = config.photo_constraints
-            if min(width, height) < MIN_DIMENSION or (limits.min_width and width < limits.min_width) or (limits.min_height and height < limits.min_height):
+            if min(width, height) < MIN_DIMENSION or (limits.min_width and width < limits.min_width) or (limits.min_height and height < limits.min_height) \
+                    or (limits.min_short_side and min(width, height) < limits.min_short_side) or (limits.min_long_side and max(width, height) < limits.min_long_side):
                 raise UnsatisfiableError(
                     f"{ctx.plan.format} produced {produced} bytes at {ctx.plan.width}x{ctx.plan.height}, over max_bytes={limit}, "
                     f"and cannot shrink below the minimum size to fit"

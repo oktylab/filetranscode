@@ -85,8 +85,9 @@ class PlanGeometry(Node):
     async def __call__(self, ctx):
         plan, limits = ctx.plan, param(ctx, "config").video_constraints
         width, height = plan.width, plan.height
-        down = min((limits.max_width or width) / width, (limits.max_height or height) / height, 1.0)
-        up = max((limits.min_width or width) / width, (limits.min_height or height) / height, 1.0)
+        short, long = min(width, height), max(width, height)
+        down = min((limits.max_width or width) / width, (limits.max_height or height) / height, (limits.max_short_side or short) / short, (limits.max_long_side or long) / long, 1.0)
+        up = max((limits.min_width or width) / width, (limits.min_height or height) / height, (limits.min_short_side or short) / short, (limits.min_long_side or long) / long, 1.0)
         if down < 1.0 and up > 1.0:
             raise UnsatisfiableError(f"{width}x{height} cannot satisfy both the minimum and maximum size constraints at once")
         scale = down if down < 1.0 else up

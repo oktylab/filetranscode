@@ -35,6 +35,11 @@ class PhotoConstraints(Model):
     max_width: int | None = Field(default=None, json_schema_extra=ui(widget="range", low=0, high=8192, step=2))
     min_height: int | None = Field(default=None, json_schema_extra=ui(widget="range", low=0, high=8192, step=2))
     max_height: int | None = Field(default=None, json_schema_extra=ui(widget="range", low=0, high=8192, step=2))
+    # bounds on the shorter and longer side whatever the orientation ("max 1080p" is max_short_side=1080, max_long_side=1920)
+    min_short_side: int | None = Field(default=None, json_schema_extra=ui(widget="range", low=0, high=8192, step=2))
+    max_short_side: int | None = Field(default=None, json_schema_extra=ui(widget="range", low=0, high=8192, step=2))
+    min_long_side: int | None = Field(default=None, json_schema_extra=ui(widget="range", low=0, high=8192, step=2))
+    max_long_side: int | None = Field(default=None, json_schema_extra=ui(widget="range", low=0, high=8192, step=2))
     min_aspect: float | None = None
     max_aspect: float | None = None
     aspects: list[str] | None = None

@@ -161,6 +161,8 @@ PRESETS: dict[str, PhotoPreset] = {
             max_width=1920,
             max_height=1920,
             max_pixels=1920 * 1080,
+            # "max 1080p": 1099x1083 fails with picture_size_check_failed, 1096x1080 posts (measured 2026-11-17)
+            max_short_side=1080,
             max_bytes=20 * MB,
         ),
     ),
