@@ -23,6 +23,15 @@ class AdoptPlan(Node):
 
 ###########################################################################################################
 ###########################################################################################################
+class AdoptChunks(Node):
+    # merge given the source: the listed chunks become the pending outputs, so the source can take the input slot
+    async def __call__(self, ctx):
+        ctx.output = [OutputData(raw_path=data.raw_path, raw_stream=data.raw_stream, raw_bytes=data.raw_bytes) for data in ctx.input]
+        return ctx
+
+
+###########################################################################################################
+###########################################################################################################
 class FanOutExport(Node):
     def __init__(self, pipeline) -> None:
         self.pipeline = pipeline
@@ -30,20 +39,20 @@ class FanOutExport(Node):
     async def __call__(self, ctx):
         limit = asyncio.Semaphore(os.cpu_count() or 4)
         config = param(ctx, "config")
-        plan = _chunk_plan(ctx.plan)
-        starts = None
-        if plan.trim_start is not None or plan.trim_end is not None or plan.speed != 1.0:
+        durations = [0.0] * len(ctx.output)
+        if ctx.plan.trim_start is not None or ctx.plan.trim_end is not None or ctx.plan.speed != 1.0:
             probed = [(await self.pipeline.probe(input=chunk.path, engine=config.engine))[0] for chunk in ctx.output]
             if any(metadata.audio for metadata in probed):
                 raise UnsatisfiableError(f"fanout trims and speed need chunks without audio, which the {config.engine} engine's split keeps; use export")
-            starts = [sum(metadata.duration for metadata in probed[:index]) for index in range(len(probed))]
+            durations = [metadata.duration for metadata in probed]
 
         async def export_chunk(index, chunk, plan):
             async with limit:
                 with span("Chunk", str(index)):
                     return await self.pipeline.export(input=chunk.bytes_, output=AsBytes(), config=config, plan=plan)
 
-        delivered = await asyncio.gather(*(export_chunk(index, chunk, plan) for index, (chunk, plan) in enumerate(_chunk_plans(plan, ctx.output, starts))))
+        kept = [(chunk, plan) for chunk, plan in zip(ctx.output, chunk_plans(ctx.plan, durations)) if plan]
+        delivered = await asyncio.gather(*(export_chunk(index, chunk, plan) for index, (chunk, plan) in enumerate(kept)))
         for chunk in ctx.output:
             chunk.cleanup()
         # the exported chunks are the pending outputs merge reassembles; the source stays as the input (its soundtrack)
@@ -69,17 +78,20 @@ def _chunk_plan(plan):
 
 ###########################################################################################################
 ###########################################################################################################
-def _chunk_plans(plan, chunks, starts):
-    # Speed needs no per-chunk change (setpts stretches every chunk alike), trims do: a chunk outside the window is
-    # dropped and the window's edges are rebased onto the chunk holding them. Chunk starts are the probed video
-    # durations summed, not multiples of chunk_seconds: the cuts land on keyframes.
+def chunk_plans(plan, durations: list[float]) -> list:
+    """The plan each split chunk exports with, None for a chunk the trim window drops. Speed needs no per-chunk change
+    (setpts stretches every chunk alike), trims do: the window's edges are rebased onto the chunk holding them.
+    `durations` are the chunks' probed video durations, read only when the plan trims: the cuts land on keyframes,
+    not on multiples of chunk_seconds."""
+    plan = _chunk_plan(plan)
     if plan.trim_start is None and plan.trim_end is None:
-        return [(chunk, plan) for chunk in chunks]
+        return [plan] * len(durations)
     start, end = plan.trim_start or 0.0, math.inf if plan.trim_end is None else plan.trim_end
-    kept = []
-    for chunk, begin, stop in zip(chunks, starts, [*starts[1:], math.inf]):
+    begins = [sum(durations[:index]) for index in range(len(durations))]
+    plans = []
+    for begin, stop in zip(begins, [*begins[1:], math.inf]):
         if stop <= start or begin >= end:
+            plans.append(None)
             continue
-        rebased = {"trim_start": start - begin if start > begin else None, "trim_end": end - begin if end < stop else None}
-        kept.append((chunk, plan.model_copy(update=rebased)))
-    return kept
+        plans.append(plan.model_copy(update={"trim_start": start - begin if start > begin else None, "trim_end": end - begin if end < stop else None}))
+    return plans

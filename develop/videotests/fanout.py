@@ -17,6 +17,7 @@ import numpy as np
 
 from filetranscode import VideoPipeline
 from filetranscode.builtin.video.config import VideoConfig
+from filetranscode.builtin.video.fanout import chunk_plans
 from filetranscode.builtin.video.models import Edits, VideoConstraints
 
 PASSED = []
@@ -107,6 +108,21 @@ def nearest(frame: np.ndarray, candidates: list[np.ndarray], offset: int) -> tup
     return best + offset, scores[best]
 
 
+async def split_export_merge(pipe, source: str, workdir: str, label: str, config, chunk_seconds: float) -> str:
+    # fanout's steps as separate calls, the way separate machines run them: only paths and plans cross between them
+    folder = os.path.join(workdir, f"{label}_chunks")
+    plan = await pipe.plan(input=source, config=config)
+    chunks = await pipe.split(input=source, output=os.path.join(folder, "part.mp4"), config=config, chunk_seconds=chunk_seconds, plan=plan)
+    durations = [(await pipe.probe(input=chunk))[0].duration for chunk in chunks]
+    exported = [
+        await pipe.export(input=chunk, output=os.path.join(folder, f"out_{index:03d}.mp4"), config=config, plan=chunk_plan)
+        for index, (chunk, chunk_plan) in enumerate(zip(chunks, chunk_plans(plan, durations))) if chunk_plan
+    ]
+    actual = os.path.join(workdir, f"{label}_split.mp4")
+    await pipe.merge(inputs=exported, output=actual, input=source, plan=plan)
+    return actual
+
+
 async def run_case(pipe, source: str, workdir: str, label: str, chunk_seconds: float, codecs: list[str], start, end, speed) -> None:
     print(f"== {label}")
     config = VideoConfig(video_constraints=VideoConstraints(codecs=codecs), edits=Edits(trim_start=start, trim_end=end, speed=speed))
@@ -146,6 +162,16 @@ async def run_case(pipe, source: str, workdir: str, label: str, chunk_seconds: f
         candidates = frames(source, last_index - 2, last_index + 2, want["width"], want["height"])
         index, score = nearest(last_got, candidates, last_index - 2)
         check(f"{label} last frame is source frame {last_index}", index == last_index and score >= 28, f"nearest source frame {index} at {score:.1f} dB")
+    separate = await split_export_merge(pipe, source, workdir, label, config, chunk_seconds)
+    split_probe = probe(separate)
+    for key in ("codec", "width", "height", "pix_fmt", "fps", "frames"):
+        check(f"{label} split/merge {key}", split_probe[key] == got[key], f"fanout {got[key]} split/merge {split_probe[key]}")
+    check(f"{label} split/merge duration", abs(split_probe["duration"] - got["duration"]) <= frame + 1e-6, f"fanout {got['duration']:.4f} split/merge {split_probe['duration']:.4f}")
+    check(f"{label} split/merge audio duration", abs(split_probe["audio_duration"] - got["audio_duration"]) <= 1e-3, f"fanout {got['audio_duration']:.4f} split/merge {split_probe['audio_duration']:.4f}")
+    check(f"{label} split/merge no silence at joins", not silences(separate), "; ".join(silences(separate)))
+    for index in (0, got["frames"] // 2, got["frames"] - 1):
+        score = psnr(frames(separate, index, index, got["width"], got["height"])[0], frames(actual, index, index, got["width"], got["height"])[0])
+        check(f"{label} split/merge frame {index} matches fanout", score >= 40, f"{score:.1f} dB")
     ROWS.append((label, f"{want['duration']:.4f}/{got['duration']:.4f}", f"{want['frames']}/{got['frames']}", f"{want['audio_duration']:.4f}/{got['audio_duration']:.4f}",
                  f"{offset_want:.4f}/{offset_got:.4f}", str(len(quiet)), f"{psnr(first_got, first_want):.1f}/{psnr(last_got, last_want):.1f}", f"{single:.0f}s/{chunked:.0f}s"))
 

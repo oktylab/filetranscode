@@ -18,7 +18,7 @@ if PYAV:
     from .engines.pyav import PyAvEngine
 if MOVIEPY:
     from .engines.moviepy import MoviePyEngine
-from .fanout import AdoptPlan, FanOutExport
+from .fanout import AdoptChunks, AdoptPlan, FanOutExport
 from .models import ExportPlan, VideoMetadata, VideoPreset
 from .planner import Copy, PlanAction, PlanAudio, PlanCodec, PlanCrop, PlanEdits, PlanFrameRate, PlanGeometry, PlanLimits
 from .presets import PRESETS, Preset, PresetIndex
@@ -176,14 +176,35 @@ class VideoPipeline(Pipeline):
     #####################################################
     #####################################################
     @node("split", public=True)
-    def split(self, input: InputLike, output: OutputLike, config: VideoConfig, chunk_seconds: float = 60.0) -> list[Any]:
-        return Sequence(self.ref("resolve"), self.engine_operation("probe"), self.engine_operation("split"), Set(probe="after"), self.engine_operation("probe"), OutputEach(self.ref("output")))
+    def split(self, input: InputLike, output: OutputLike, config: VideoConfig, chunk_seconds: float = 60.0, plan: ExportPlan | None = None) -> list[Any]:
+        # given the export plan, the chunks carry video only (see chunk_plans and merge, for exporting them on separate machines)
+        return Sequence(
+            self.ref("resolve"),
+            self.engine_operation("probe"),
+            Branch(selector=lambda ctx: "given" if getattr(ctx.params, "plan", None) else "none", given=AdoptPlan(), none=Noop()),
+            self.engine_operation("split"),
+            Set(probe="after"),
+            self.engine_operation("probe"),
+            OutputEach(self.ref("output")),
+        )
 
     #####################################################
     #####################################################
     @node("merge", public=True)
-    def merge(self, inputs: InputsLike, output: OutputLike, engine: EngineChoice = "ffmpeg") -> Any:
-        return Sequence(InputListResolver(self._registry, f"{self.name}.resolve"), self.engine_operation("merge"), Set(probe="after"), self.engine_operation("probe"), self.ref("output"))
+    def merge(self, inputs: InputsLike, output: OutputLike, engine: EngineChoice = "ffmpeg", input: InputLike | None = None, plan: ExportPlan | None = None) -> Any:
+        # given the source and the plan split was given (chunk_plans derived each chunk's export from it), the soundtrack is cut, stretched and encoded once from the source
+        return Sequence(
+            InputListResolver(self._registry, f"{self.name}.resolve"),
+            Branch(
+                selector=lambda ctx: "given" if getattr(ctx.params, "plan", None) else "none",
+                given=Sequence(AdoptChunks(), self.ref("resolve"), self.engine_operation("probe"), AdoptPlan()),
+                none=Noop(),
+            ),
+            self.engine_operation("merge"),
+            Set(probe="after"),
+            self.engine_operation("probe"),
+            self.ref("output"),
+        )
 
     #####################################################
     #####################################################
