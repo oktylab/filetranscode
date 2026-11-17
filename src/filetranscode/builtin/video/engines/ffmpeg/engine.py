@@ -163,9 +163,9 @@ class FfmpegEngine(Engine):
             args += ["-ss", f"{plan.trim_start:g}"]
         args += [*_input_args(ctx.input[0].path), "-i", ctx.input[0].path]
         if plan.frame_image:
-            # one frame lasting one output frame, so swapping it in keeps the video's length
+            # looped at the output rate, a frame more than it replaces (the graph keeps exactly that many), so swapping them in keeps the video's length
             rate = Fraction(output_fps(plan, metadata)).limit_denominator(1001)
-            args += ["-loop", "1", "-framerate", str(rate), "-t", f"{1 / rate:.6f}", *_input_args(plan.frame_image), "-i", plan.frame_image]
+            args += ["-loop", "1", "-framerate", str(rate), "-t", f"{(plan.frame_image_frames + 1) / rate:.6f}", *_input_args(plan.frame_image), "-i", plan.frame_image]
         if plan.trim_end is not None:
             args += ["-t", f"{(plan.trim_end - (plan.trim_start or 0)) / plan.speed:g}"]
         filters = video_filters(plan, metadata)

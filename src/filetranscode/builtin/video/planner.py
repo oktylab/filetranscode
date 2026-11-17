@@ -166,7 +166,7 @@ class PlanEdits(Node):
         if edits.volume != 1.0:
             plan.volume = edits.volume
         if edits.frame_image:
-            plan.frame_image, plan.frame_image_at = edits.frame_image, edits.frame_image_at
+            plan.frame_image, plan.frame_image_at, plan.frame_image_frames = edits.frame_image, edits.frame_image_at, edits.frame_image_frames
             plan.reasons.video.append("frame_image")
         if edits.trim_start is None and edits.trim_end is None:
             return ctx
