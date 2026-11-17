@@ -227,7 +227,8 @@ PRESETS: dict[str, VideoPreset] = {
             max_bitrate=25_000_000,
             min_fps=23,
             max_fps=60,
-            max_bytes=1000 * MB,
+            # Threads documents 1 GB but its processing fails above about 440 MB (434 MB passed, 447 MB failed, 2026-11-17)
+            max_bytes=430 * MB,
             max_duration=300,
             max_width=1920,
         ),
