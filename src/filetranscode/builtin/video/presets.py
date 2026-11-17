@@ -227,9 +227,7 @@ PRESETS: dict[str, VideoPreset] = {
             max_bitrate=25_000_000,
             min_fps=23,
             max_fps=60,
-            # documented 1 GB, but Threads processing ends in ERROR UNKNOWN above roughly 450 MB: the same untouched
-            # 25 Mbps stream passed at 434 MB and failed at 505 MB (measured 2026-11-17)
-            max_bytes=400 * MB,
+            max_bytes=1000 * MB,
             max_duration=300,
             max_width=1920,
         ),
