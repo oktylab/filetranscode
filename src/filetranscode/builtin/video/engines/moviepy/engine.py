@@ -5,7 +5,7 @@ from moviepy import VideoFileClip, afx, concatenate_videoclips, vfx
 from moviepy.config import FFMPEG_BINARY
 from moviepy.video.io.ffmpeg_reader import ffmpeg_parse_infos
 
-from .....exceptions import ProbeError
+from .....exceptions import ProbeError, UnsatisfiableError
 from ....toolkit.engine import Engine, operation, probing
 from ....toolkit.output_resolve import OutputData
 from ...formats import audio_codec_of, format_for_extension, format_of, segment_format
@@ -60,6 +60,8 @@ class MoviePyEngine(Engine):
     @operation
     async def encode(self, ctx):
         plan, metadata = ctx.plan, ctx.metadata.before[0]
+        if plan.frame_image:
+            raise UnsatisfiableError("frame_image needs the ffmpeg engine")
         with VideoFileClip(ctx.input[0].path) as clip:
             out = clip
             if plan.trim_start is not None or plan.trim_end is not None:

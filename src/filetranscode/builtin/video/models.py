@@ -38,6 +38,7 @@ class VideoMetadata(Model):
     color_space: str | None = None
     color_range: str | None = None
     audio: AudioMetadata | None = None
+    last_frame_time: float | None = None  # presentation time of the last video frame, in seconds from the start
 
 
 ###########################################################################################################
@@ -96,6 +97,9 @@ class Edits(Model):
     aspect: str | None = Field(default=None, json_schema_extra=ui(widget="aspect", choices=["9:16", "16:9", "1:1", "4:5", "2:3"]))
     speed: float = Field(default=1.0, ge=0.1, le=5.0, json_schema_extra=ui(widget="range", low=0.1, high=5, step=0.1))
     volume: float = Field(default=1.0, ge=0.0, le=3.0, json_schema_extra=ui(widget="range", low=0, high=3, step=0.05))
+    # path or URL of an image that replaces the first or last frame (frame_image_at) of the delivered video, scaled and cropped to fill it
+    frame_image: str | None = None
+    frame_image_at: Literal["first", "last"] = Field(default="last", json_schema_extra=ui(choices=["first", "last"]))
 
 
 ###########################################################################################################
@@ -207,6 +211,8 @@ class ExportPlan(BaseModel):
     trim_end: float | None = None
     speed: float = 1.0
     volume: float = 1.0
+    frame_image: str | None = None
+    frame_image_at: Literal["first", "last"] = "last"
 
 
 ###########################################################################################################

@@ -26,6 +26,29 @@ def video_filters(plan, metadata) -> list[str]:
 
 ###########################################################################################################
 ###########################################################################################################
+def output_fps(plan, metadata) -> float:
+    return plan.fps or metadata.fps or 30.0
+
+
+def frame_image_graph(plan, metadata, filters: list[str]) -> str:
+    """The video filters, then the image (input 1, one frame lasting one output frame) swapped in for the first or
+    last frame. The last frame is dropped without knowing when the video ends: a copy one frame ahead, shrunk to an
+    invisible 2x2 overlay, runs out one frame early and overlay=shortest stops the video there."""
+    image = (f"[1:v]scale={plan.width}:{plan.height}:force_original_aspect_ratio=increase,"
+             f"crop={plan.width}:{plan.height},setsar=1,format={plan.pix_fmt},setpts=PTS-STARTPTS[image]")
+    video = f"[0:v]{','.join(filters) or 'null'},setpts=PTS-STARTPTS"
+    if plan.trim_end is not None:
+        # the output's -t cut, made inside the graph so the swapped frame is the last one -t keeps
+        video += f",trim=end={(plan.trim_end - (plan.trim_start or 0)) / plan.speed:.6f}"
+    if plan.frame_image_at == "first":
+        return f"{video},trim=start_frame=1,setpts=PTS-STARTPTS[rest];{image};[image][rest]concat=n=2:v=1:a=0[video]"
+    return (f"{video},split[full][ahead];"
+            "[ahead]trim=start_frame=1,setpts=PTS-STARTPTS,scale=2:2,format=yuva420p,colorchannelmixer=aa=0[mask];"
+            f"[full][mask]overlay=shortest=1:format=auto[rest];{image};[rest][image]concat=n=2:v=1:a=0[video]")
+
+
+###########################################################################################################
+###########################################################################################################
 def escape(args: str) -> str:
     return args.replace(",", "\\,")
 

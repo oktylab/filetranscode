@@ -85,7 +85,7 @@ def chunk_plans(plan, durations: list[float]) -> list:
     not on multiples of chunk_seconds."""
     plan = _chunk_plan(plan)
     if plan.trim_start is None and plan.trim_end is None:
-        return [plan] * len(durations)
+        return _place_frame_image([plan] * len(durations))
     start, end = plan.trim_start or 0.0, math.inf if plan.trim_end is None else plan.trim_end
     begins = [sum(durations[:index]) for index in range(len(durations))]
     plans = []
@@ -94,4 +94,13 @@ def chunk_plans(plan, durations: list[float]) -> list:
             plans.append(None)
             continue
         plans.append(plan.model_copy(update={"trim_start": start - begin if start > begin else None, "trim_end": end - begin if end < stop else None}))
-    return plans
+    return _place_frame_image(plans)
+
+
+def _place_frame_image(plans: list) -> list:
+    # the frame image belongs to the first or last chunk the trim keeps, every other chunk exports without it
+    kept = [index for index, plan in enumerate(plans) if plan]
+    if not kept or plans[kept[0]].frame_image is None:
+        return plans
+    target = kept[0] if plans[kept[0]].frame_image_at == "first" else kept[-1]
+    return [plan if plan is None or index == target else plan.model_copy(update={"frame_image": None}) for index, plan in enumerate(plans)]

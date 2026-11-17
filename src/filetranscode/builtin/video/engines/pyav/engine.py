@@ -4,7 +4,7 @@ from fractions import Fraction
 import av
 import av.error
 
-from .....exceptions import ProbeError
+from .....exceptions import ProbeError, UnsatisfiableError
 from ....toolkit.engine import Engine, operation, probing
 from ....toolkit.output_resolve import OutputData
 from ...formats import segment_format
@@ -184,6 +184,8 @@ class PyAvEngine(Engine):
     @operation
     async def encode(self, ctx):
         plan, metadata = ctx.plan, ctx.metadata.before[0]
+        if plan.frame_image:
+            raise UnsatisfiableError("frame_image needs the ffmpeg engine")
         buffer = io.BytesIO()
         with _open(ctx.input[0]) as source, av.open(buffer, "w", format=plan.format) as sink:
             video_in = source.streams.video[0]

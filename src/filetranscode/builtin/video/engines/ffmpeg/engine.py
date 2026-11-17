@@ -4,6 +4,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+from fractions import Fraction
 from glob import glob
 from urllib.parse import urlsplit
 
@@ -13,7 +14,7 @@ from ....toolkit.output_resolve import OutputData
 from ...formats import format_of, segment_format
 from ...models import AudioMetadata, VideoMetadata
 from ..encoders import pick_encoder
-from .filters import audio_filters, video_filters
+from .filters import audio_filters, frame_image_graph, output_fps, video_filters
 from .rate import rate_args
 
 BINARY = "ffmpeg"
@@ -66,20 +67,25 @@ class FfmpegEngine(Engine):
             sink.append(await self._probe(data))
         return ctx
 
-    async def _measured_duration(self, path: str) -> float | None:
+    async def _measured_tail(self, path: str, video_index: int) -> tuple[float | None, float | None]:
+        # one read of the packets after the last keyframe: where the last packet of any stream ends, and the
+        # presentation time of the last video frame (the highest video pts, as B-frames reorder)
         result = await asyncio.to_thread(
             subprocess.run,
-            [PROBE_BINARY, "-v", "error", "-read_intervals", "99999999%", "-show_entries", "packet=pts_time,duration_time", "-of", "csv=p=0", *_input_args(path), path],
+            [PROBE_BINARY, "-v", "error", "-read_intervals", "99999999%", "-show_entries", "packet=stream_index,pts_time,duration_time", "-of", "csv=p=0", *_input_args(path), path],
             capture_output=True, text=True,
         )
-        ends = []
+        ends, frames = [], []
         for line in result.stdout.splitlines():
-            pts, duration = (line.split(",") + [""])[:2]
+            index, pts, duration = (line.split(",") + ["", ""])[:3]
             try:
-                ends.append(float(pts) + (float(duration) if duration and duration != "N/A" else 0.0))
+                start = float(pts)
+                ends.append(start + (float(duration) if duration and duration != "N/A" else 0.0))
             except ValueError:
                 continue
-        return max(ends) if ends else None
+            if index == str(video_index):
+                frames.append(start)
+        return (max(ends) if ends else None), (max(frames) if frames else None)
 
     async def _measured_audio_bps(self, path: str, duration: float) -> int | None:
         result = await asyncio.to_thread(
@@ -133,10 +139,12 @@ class FfmpegEngine(Engine):
         )
         # The packet scan refines coarse or missing header durations (matroska rounds to ms) but must not exceed the
         # container's presentation length: an MP4 edit list trims the last AAC frame's padding, which packets still carry.
-        measured = await self._measured_duration(source.path)
+        measured, last_frame = await self._measured_tail(source.path, video.get("index", 0))
         declared = float(container.get("duration") or 0) or None
         if measured:
             metadata = metadata.model_copy(update={"duration": min(measured, declared) if declared else measured})
+        if last_frame is not None:
+            metadata = metadata.model_copy(update={"last_frame_time": max(last_frame - float(container.get("start_time") or 0), 0.0)})
         if metadata.audio and metadata.audio.bitrate is None and metadata.duration:
             bps = await self._measured_audio_bps(source.path, metadata.duration)
             if bps:
@@ -152,10 +160,16 @@ class FfmpegEngine(Engine):
         if plan.trim_start:
             args += ["-ss", f"{plan.trim_start:g}"]
         args += [*_input_args(ctx.input[0].path), "-i", ctx.input[0].path]
+        if plan.frame_image:
+            # one frame lasting one output frame, so swapping it in keeps the video's length
+            rate = Fraction(output_fps(plan, metadata)).limit_denominator(1001)
+            args += ["-loop", "1", "-framerate", str(rate), "-t", f"{1 / rate:.6f}", *_input_args(plan.frame_image), "-i", plan.frame_image]
         if plan.trim_end is not None:
             args += ["-t", f"{(plan.trim_end - (plan.trim_start or 0)) / plan.speed:g}"]
         filters = video_filters(plan, metadata)
-        if filters:
+        if plan.frame_image:
+            args += ["-filter_complex", frame_image_graph(plan, metadata, filters), "-map", "[video]", "-map", "0:a:0?"]
+        elif filters:
             args += ["-vf", ",".join(filters)]
         encoder = pick_encoder(BINARY, plan.encoders)
         args += ["-c:v", encoder, "-pix_fmt", plan.pix_fmt]
