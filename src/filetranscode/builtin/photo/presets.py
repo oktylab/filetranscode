@@ -77,9 +77,10 @@ PRESETS: dict[str, PhotoPreset] = {
             formats=["jpeg", "png", "gif"],
             min_width=320,
             max_width=1440,
-            min_aspect=0.8,
+            # Instagram took 0.561 (3:4, 9:16 and everything between) and refused 0.5567 with error 36003 (2026-11-17);
+            # the planner keeps 1% under min_aspect, so 0.5667 puts the lowest accepted ratio at 0.561
+            min_aspect=0.5667,
             max_aspect=1.91,
-            aspects=["9:16"],
             max_bytes=8 * MB,
         ),
     ),
