@@ -1,13 +1,13 @@
 import asyncio
 import io
+import math
 import os
 
 from ...core.core import Node
 from ...core.trace import span
 from ...exceptions import UnsatisfiableError
-from ..toolkit.input_resolve import InputData
 from ..toolkit.introspect import param
-from ..toolkit.output_resolve import AsBytes
+from ..toolkit.output_resolve import AsBytes, OutputData
 
 CHUNK_BITRATE_FACTOR = 0.88
 CHUNK_CAP_FACTOR = 0.85
@@ -28,22 +28,26 @@ class FanOutExport(Node):
         self.pipeline = pipeline
 
     async def __call__(self, ctx):
-        if ctx.plan.trim_start is not None or ctx.plan.trim_end is not None or ctx.plan.speed != 1.0:
-            raise UnsatisfiableError("fanout does not support trims or speed yet; use export")
         limit = asyncio.Semaphore(os.cpu_count() or 4)
-        plan = _chunk_plan(ctx.plan)
         config = param(ctx, "config")
+        plan = _chunk_plan(ctx.plan)
+        starts = None
+        if plan.trim_start is not None or plan.trim_end is not None or plan.speed != 1.0:
+            probed = [(await self.pipeline.probe(input=chunk.path, engine=config.engine))[0] for chunk in ctx.output]
+            if any(metadata.audio for metadata in probed):
+                raise UnsatisfiableError(f"fanout trims and speed need chunks without audio, which the {config.engine} engine's split keeps; use export")
+            starts = [sum(metadata.duration for metadata in probed[:index]) for index in range(len(probed))]
 
-        async def export_chunk(index, chunk):
+        async def export_chunk(index, chunk, plan):
             async with limit:
                 with span("Chunk", str(index)):
                     return await self.pipeline.export(input=chunk.bytes_, output=AsBytes(), config=config, plan=plan)
 
-        delivered = await asyncio.gather(*(export_chunk(index, chunk) for index, chunk in enumerate(ctx.output)))
+        delivered = await asyncio.gather(*(export_chunk(index, chunk, plan) for index, (chunk, plan) in enumerate(_chunk_plans(plan, ctx.output, starts))))
         for chunk in ctx.output:
             chunk.cleanup()
-        ctx.input = [InputData(raw_bytes=data.getvalue() if isinstance(data, io.BytesIO) else bytes(data)) for data in delivered]
-        ctx.output = []
+        # the exported chunks are the pending outputs merge reassembles; the source stays as the input (its soundtrack)
+        ctx.output = [OutputData(raw_bytes=data.getvalue() if isinstance(data, io.BytesIO) else bytes(data)) for data in delivered]
         return ctx
 
 
@@ -61,3 +65,21 @@ def _chunk_plan(plan):
         if rate.bufsize:
             updates["bufsize"] = 2 * updates["maxrate"]
     return plan.model_copy(update={"rate": rate.model_copy(update=updates)}) if updates else plan
+
+
+###########################################################################################################
+###########################################################################################################
+def _chunk_plans(plan, chunks, starts):
+    # Speed needs no per-chunk change (setpts stretches every chunk alike), trims do: a chunk outside the window is
+    # dropped and the window's edges are rebased onto the chunk holding them. Chunk starts are the probed video
+    # durations summed, not multiples of chunk_seconds: the cuts land on keyframes.
+    if plan.trim_start is None and plan.trim_end is None:
+        return [(chunk, plan) for chunk in chunks]
+    start, end = plan.trim_start or 0.0, math.inf if plan.trim_end is None else plan.trim_end
+    kept = []
+    for chunk, begin, stop in zip(chunks, starts, [*starts[1:], math.inf]):
+        if stop <= start or begin >= end:
+            continue
+        rebased = {"trim_start": start - begin if start > begin else None, "trim_end": end - begin if end < stop else None}
+        kept.append((chunk, plan.model_copy(update=rebased)))
+    return kept

@@ -321,12 +321,13 @@ class PyAvEngine(Engine):
     #####################################################
     @operation
     async def merge(self, ctx):
-        with av.open(io.BytesIO(ctx.input[0].bytes_)) as first:
+        chunks = ctx.output or ctx.input
+        with av.open(io.BytesIO(chunks[0].bytes_)) as first:
             format, _ = segment_format(first.format.name)
         delivered = OutputData()
         listing = delivered.temp(suffix=".txt")
         with open(listing, "w") as handle:
-            handle.writelines(f"file '{data.path}'\n" for data in ctx.input)
+            handle.writelines(f"file '{data.path}'\n" for data in chunks)
         buffer = io.BytesIO()
         with av.open(listing, format="concat", options={"safe": "0"}) as source, av.open(buffer, "w", format=format) as sink:
             streams = [stream for stream in source.streams if stream.type in ("video", "audio")]
@@ -337,5 +338,7 @@ class PyAvEngine(Engine):
                 packet.stream = mapping[packet.stream.index]
                 sink.mux(packet)
         delivered.stream = buffer
-        ctx.output.append(delivered)
+        for chunk in ctx.output:
+            chunk.cleanup()
+        ctx.output = [delivered]
         return ctx

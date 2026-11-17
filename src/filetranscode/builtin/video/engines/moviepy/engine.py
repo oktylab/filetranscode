@@ -108,11 +108,12 @@ class MoviePyEngine(Engine):
     #####################################################
     @operation
     async def merge(self, ctx):
-        infos = ffmpeg_parse_infos(ctx.input[0].path)
-        extension = os.path.splitext(str(ctx.input[0].raw_path or ""))[1].lstrip(".").lower()
+        chunks = ctx.output or ctx.input
+        infos = ffmpeg_parse_infos(chunks[0].path)
+        extension = os.path.splitext(str(chunks[0].raw_path or ""))[1].lstrip(".").lower()
         format = format_for_extension(extension) or "mp4"
         encoder = pick_encoder(FFMPEG_BINARY, traits_of(infos.get("video_codec_name") or "h264").encoders)
-        clips = [VideoFileClip(data.path) for data in ctx.input]
+        clips = [VideoFileClip(data.path) for data in chunks]
         merged = concatenate_videoclips(clips)
         delivered = OutputData()
         path = delivered.temp(suffix=f".{format_of(format).extension}")
@@ -120,7 +121,9 @@ class MoviePyEngine(Engine):
         for clip in clips:
             clip.close()
         delivered.path = path
-        ctx.output.append(delivered)
+        for chunk in ctx.output:
+            chunk.cleanup()
+        ctx.output = [delivered]
         return ctx
 
     #####################################################

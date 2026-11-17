@@ -196,8 +196,9 @@ class FfmpegEngine(Engine):
         workdir = tempfile.mkdtemp()
         try:
             pattern = os.path.join(workdir, f"chunk_%03d.{extension}")
+            # chunks cut for an export plan carry video only: merge restores the soundtrack from the source
             await _run([
-                BINARY, "-y", *_input_args(ctx.input[0].path), "-i", ctx.input[0].path, "-map", "0", "-c", "copy",
+                BINARY, "-y", *_input_args(ctx.input[0].path), "-i", ctx.input[0].path, "-map", "0:v:0" if ctx.plan else "0", "-c", "copy",
                 "-f", "segment", "-segment_time", str(ctx.params.chunk_seconds),
                 "-segment_format", format, "-reset_timestamps", "1", pattern,
             ])
@@ -217,22 +218,38 @@ class FfmpegEngine(Engine):
     #####################################################
     @operation
     async def merge(self, ctx):
-        sniff = await asyncio.to_thread(subprocess.run, [PROBE_BINARY, "-v", "error", "-show_entries", "format=format_name", "-of", "csv=p=0", *_input_args(ctx.input[0].path), ctx.input[0].path], capture_output=True, text=True)
+        chunks = ctx.output or ctx.input
+        sniff = await asyncio.to_thread(subprocess.run, [PROBE_BINARY, "-v", "error", "-show_entries", "format=format_name", "-of", "csv=p=0", *_input_args(chunks[0].path), chunks[0].path], capture_output=True, text=True)
         format, _ = segment_format(sniff.stdout.strip())
         delivered = OutputData()
         listing = delivered.temp(suffix=".txt")
         with open(listing, "w") as handle:
-            handle.writelines(f"file '{data.path}'\n" for data in ctx.input)
+            handle.writelines(f"file '{data.path}'\n" for data in chunks)
         # the concat demuxer refuses non-file protocols in its listed entries unless
         # explicitly whitelisted, so a remote-URL resolver (e.g. a presigned S3 GET)
         # needs this even though ffmpeg allows the same URL directly as a top-level -i
         args = [BINARY, "-y", "-protocol_whitelist", "file,http,https,tcp,tls,crypto",
-                "-f", "concat", "-safe", "0", "-i", listing, "-c", "copy"]
+                "-f", "concat", "-safe", "0", "-i", listing]
+        plan, metadata = ctx.plan, ctx.metadata.before[0] if ctx.metadata.before else None
+        if plan and metadata and metadata.audio:
+            # keyframe cuts leave each chunk's audio long or short of its frames by up to an audio frame, so fanout
+            # chunks carry video only and the soundtrack is cut, stretched and encoded once here, from the source
+            source = ctx.input[0]
+            if plan.trim_start:
+                args += ["-ss", f"{plan.trim_start:g}"]
+            args += [*_input_args(source.path), "-i", source.path]
+            if plan.trim_end is not None:
+                args += ["-t", f"{(plan.trim_end - (plan.trim_start or 0)) / plan.speed:g}"]
+            args += ["-map", "0:v:0", "-c:v", "copy", "-map", "1:a:0", *self._audio_args(plan, metadata)]
+        else:
+            args += ["-c", "copy"]
         if format_of(format).faststart:
             args += ["-movflags", "+faststart"]
         args += ["-f", format, delivered.path]
         await _run(args)
-        ctx.output.append(delivered)
+        for chunk in ctx.output:
+            chunk.cleanup()
+        ctx.output = [delivered]
         return ctx
 
     #####################################################
