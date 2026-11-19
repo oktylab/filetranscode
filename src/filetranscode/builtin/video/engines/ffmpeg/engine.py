@@ -113,9 +113,7 @@ class FfmpegEngine(Engine):
         video = videos[0]
         audio = next((s for s in streams if s.get("codec_type") == "audio"), None)
         container = data.get("format", {})
-        # the declared rate is the most the stream plays at; a lower average means frames are missing (a variable
-        # rate phone clip declaring 30/1 that averages 20), and platforms check the frames that are there
-        rates = [int(n) / int(d) for n, d in (video.get(key, "0/0").split("/") for key in ("r_frame_rate", "avg_frame_rate")) if int(d)]
+        declared, average = (int(n) / int(d) if int(d) else None for n, d in (video.get(key, "0/0").split("/") for key in ("r_frame_rate", "avg_frame_rate")))
         rotation = next((int(float(side.get("rotation", 0))) for side in video.get("side_data_list", []) if "rotation" in side), 0) % 360
         width, height = _display(video["width"], video["height"], video.get("sample_aspect_ratio"), rotation)
         metadata = VideoMetadata(
@@ -126,7 +124,8 @@ class FfmpegEngine(Engine):
             height=height,
             rotation=rotation,
             sar=_sar(video.get("sample_aspect_ratio")),
-            fps=min(rates, default=None),
+            fps=declared or average,
+            average_fps=average,
             duration=float(video.get("duration") or container.get("duration") or 0) or None,
             frame_count=int(video["nb_frames"]) if str(video.get("nb_frames", "")).isdigit() else None,
             bitrate=int(video.get("bit_rate") or container.get("bit_rate") or 0) or None,
@@ -176,6 +175,11 @@ class FfmpegEngine(Engine):
             args += ["-vf", ",".join(filters)]
         encoder = pick_encoder(BINARY, plan.encoders)
         args += ["-c:v", encoder, "-pix_fmt", plan.pix_fmt]
+        if plan.length is not None:
+            # a fanout chunk keeps its input's time base: every chunk of one split shares it, and merge's concat
+            # copies the packets on the first chunk's time base (one picked from each chunk's own measured rate
+            # stretched a variable rate source's merged timeline 8 times)
+            args += ["-enc_time_base:v", "demux"]
         for key, value in plan.options.get(encoder, {}).items():
             args += [f"-{key}", value]
         args += rate_args(plan, encoder)

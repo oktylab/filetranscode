@@ -27,7 +27,10 @@ class VideoMetadata(Model):
     container: str | None = None
     width: int
     height: int
+    # the rate the stream's frames run on (its declared rate), and the frames it holds per second on average: a
+    # variable rate phone clip declares 30/1 and averages 29.97, one missing frames averages less
     fps: float | None = None
+    average_fps: float | None = None
     duration: float | None = None
     frame_count: int | None = None
     bitrate: int | None = None

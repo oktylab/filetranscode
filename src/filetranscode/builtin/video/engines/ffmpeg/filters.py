@@ -25,8 +25,9 @@ def video_filters(plan, metadata) -> list[str]:
         else:
             # a fanout chunk takes its share of the whole output's grid: the grid's phase at its start, then exactly its
             # frame count. Its file ends at its last frame, short of the next chunk's start, so the last frame is passed
-            # on at the end instead of rounded away, and the clone fills a grid point the end still leaves
-            steps += [f"fps={rate}:start_time={plan.first_frame_at:.6f}:eof_action=pass", "tpad=stop_mode=clone:stop=1", f"trim=end_frame={plan.frames}", "setpts=PTS-STARTPTS"]
+            # on at the end instead of rounded away, and cloned until the count is reached (a variable rate gap there
+            # can span several grid points)
+            steps += [f"fps={rate}:start_time={plan.first_frame_at:.6f}:eof_action=pass", "tpad=stop_mode=clone:stop=-1", f"trim=end_frame={plan.frames}", "setpts=PTS-STARTPTS"]
     steps += [f"{name}={escape(args)}" for name, args in avfilter_stages(plan.color, plan.height, plan.pix_fmt, metadata)]
     return steps
 

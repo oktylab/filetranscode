@@ -197,13 +197,15 @@ async def run_case(pipe, source: str, workdir: str, label: str, chunk_seconds: f
 
 
 VFR_CROP = {"x1": 0.1, "y1": 0.1, "x2": 0.9, "y2": 0.9}
-# (label, chunk_seconds, config): one second chunks, so twenty joins would show any rounding that adds up
+# (label, clip, chunk_seconds, config): one second chunks, so twenty joins would show any rounding that adds up
 VFR_CASES = [
-    ("vfr_keep_timing", 1, {"edits": {"crop": VFR_CROP}}),
-    ("vfr_keep_timing_trim", 1, {"edits": {"crop": VFR_CROP, "trim_start": 3.3, "trim_end": 16.7}}),
-    ("vfr_cap24", 1, {"video_constraints": {"max_fps": 24}, "edits": {"crop": VFR_CROP}}),
-    ("vfr_cap24_trim", 1, {"video_constraints": {"max_fps": 24}, "edits": {"crop": VFR_CROP, "trim_start": 3.3, "trim_end": 16.7}}),
-    ("vfr_speed1.5", 1, {"edits": {"crop": VFR_CROP, "speed": 1.5}}),
+    ("vfr_keep_timing", "vfr", 1, {"edits": {"crop": VFR_CROP}}),
+    ("vfr_keep_timing_trim", "vfr", 1, {"edits": {"crop": VFR_CROP, "trim_start": 3.3, "trim_end": 16.7}}),
+    ("vfr_cap24", "vfr", 1, {"video_constraints": {"max_fps": 24}, "edits": {"crop": VFR_CROP}}),
+    ("vfr_cap24_trim", "vfr", 1, {"video_constraints": {"max_fps": 24}, "edits": {"crop": VFR_CROP, "trim_start": 3.3, "trim_end": 16.7}}),
+    ("vfr_speed1.5", "vfr", 1, {"edits": {"crop": VFR_CROP, "speed": 1.5}}),
+    # each chunk measures its own rate (59.94, 60, 60.0024): their exports must still share one time base for merge
+    ("mixed_rates_keep_timing", "mixed", 5, {"edits": {"crop": VFR_CROP}}),
 ]
 
 
@@ -214,6 +216,21 @@ def generate_vfr(workdir: str) -> str:
         sh(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc2=size=320x180:rate=60", "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000", "-t", "20",
             "-vf", "select='gt(random(1),0.5)'", "-fps_mode", "vfr", "-c:v", "libx264", "-preset", "veryfast", "-g", "30", "-pix_fmt", "yuv420p",
             "-c:a", "aac", "-b:a", "96k", "-video_track_timescale", "600", path])
+    return path
+
+
+def generate_mixed(workdir: str) -> str:
+    # three five second sections at slightly different rates on a 1/1000000 timescale, like a camera's long take
+    path = os.path.join(workdir, "mixed.mov")
+    if not os.path.exists(path):
+        listing = os.path.join(workdir, "mixed.txt")
+        with open(listing, "w") as handle:
+            for index, rate in enumerate(("60000/1001", "60/1", "500000/8333")):
+                section = os.path.join(workdir, f"mixed_{index}.mp4")
+                sh(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", f"testsrc2=size=320x568:rate={rate}", "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000", "-t", "5",
+                    "-c:v", "libx264", "-preset", "veryfast", "-g", "60", "-pix_fmt", "yuv420p", "-c:a", "aac", "-video_track_timescale", "1000000", section])
+                handle.write(f"file '{section}'\n")
+        sh(["ffmpeg", "-v", "error", "-y", "-f", "concat", "-safe", "0", "-i", listing, "-c", "copy", "-video_track_timescale", "1000000", path])
     return path
 
 
@@ -244,7 +261,9 @@ async def run_vfr_case(pipe, source: str, workdir: str, label: str, chunk_second
     separate = await split_export_merge(pipe, source, workdir, label, config, chunk_seconds)
     resampled = "fps" in plan.reasons.video or plan.speed != 1.0
     if not resampled:
-        want = frame_times(expected)
+        # the source's own frame times inside the window, from the first kept frame
+        window = [time for time in frame_times(source) if (plan.trim_start or 0.0) - 1e-9 <= time < (plan.trim_end if plan.trim_end is not None else math.inf)]
+        want = [time - window[0] for time in window]
         for name, path in (("fanout", actual), ("split/merge", separate)):
             got = frame_times(path)
             worst = max((abs(a - b) for a, b in zip(want, got)), default=0.0)
@@ -273,11 +292,11 @@ async def main_async(workdir: str) -> None:
     pipe = VideoPipeline()
     clips = generate(workdir)
     only = sys.argv[2:]
-    vfr = generate_vfr(workdir)
-    for label, chunk_seconds, config_data in VFR_CASES:
+    sources = {"vfr": generate_vfr(workdir), "mixed": generate_mixed(workdir)}
+    for label, clip, chunk_seconds, config_data in VFR_CASES:
         if only and not any(token in label for token in only):
             continue
-        await run_vfr_case(pipe, vfr, workdir, label, chunk_seconds, config_data)
+        await run_vfr_case(pipe, sources[clip], workdir, label, chunk_seconds, config_data)
     for clip, chunk_seconds, codecs, start, end, speed, crop in CASES:
         label = f"{clip}_{codecs[0]}_c{chunk_seconds:g}_{start if start is not None else 'x'}-{end if end is not None else 'x'}_s{speed:g}{'_crop' if crop else ''}"
         if only and not any(token in label for token in only):

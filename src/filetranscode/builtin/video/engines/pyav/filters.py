@@ -33,7 +33,7 @@ def video_steps(plan, metadata) -> list[tuple[str, str]]:
             steps.append(("fps", f"{rate}"))
         else:
             # a fanout chunk takes its share of the whole output's grid, as in the ffmpeg engine
-            steps += [("fps", f"fps={rate}:start_time={plan.first_frame_at:.6f}:eof_action=pass"), ("tpad", "stop_mode=clone:stop=1"), ("trim", f"end_frame={plan.frames}"), ("setpts", "PTS-STARTPTS")]
+            steps += [("fps", f"fps={rate}:start_time={plan.first_frame_at:.6f}:eof_action=pass"), ("tpad", "stop_mode=clone:stop=-1"), ("trim", f"end_frame={plan.frames}"), ("setpts", "PTS-STARTPTS")]
     steps += avfilter_stages(plan.color, plan.height, plan.pix_fmt, metadata)
     return steps
 
