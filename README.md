@@ -38,7 +38,7 @@ plan = await photo.plan(metadata=meta, config={"preset": "instagram_photo"})
 
 `plan` returns an `ExportPlan` (action, target format/codec, geometry, quality, reasons) or raises `UnsatisfiableError` with a plain explanation of which constraint cannot be met.
 
-Instead of a preset, pass explicit constraints: `config={"photo_constraints": {"formats": ["jpeg"], "max_bytes": 5_000_000}}`. Filters (brightness, contrast, saturation, hue, grayscale, sepia, invert) and edits (aspect, trim, speed, volume, background, still) ride along in the same config.
+Instead of a preset, pass explicit constraints: `config={"photo_constraints": {"formats": ["jpeg"], "max_bytes": 5_000_000}}`. Filters (brightness, contrast, saturation, hue, grayscale, sepia, invert) and edits (crop, aspect, trim, speed, volume, background, still) ride along in the same config. `crop` keeps a free rectangle, `{"x1": 0.1, "y1": 0, "x2": 0.9, "y2": 0.75}`: its edges as fractions of the displayed width and height (after rotation and pixel aspect), snapped to even pixels for video. A crop wins over `aspect`, which is then ignored, and the cropped shape must still pass the aspect constraints.
 
 ## CLI and web UI
 

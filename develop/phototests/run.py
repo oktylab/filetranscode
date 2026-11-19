@@ -400,6 +400,41 @@ def main() -> int:
         img.seek(1)
         check("zero-delay preserved on export", img.info.get("duration", -1) == 0, str(img.info.get("duration")))
 
+    print("== R. free crop rectangle ==")
+    crop = {"x1": 0.25, "y1": 0.1, "x2": 0.75, "y2": 0.6}
+    p = plan(files["photo"], photo_constraints={"formats": ["png"]}, edits={"crop": crop})
+    box = p.crop.model_dump() if p.crop else None
+    check("crop plan box", box == {"x": 300, "y": 90, "width": 600, "height": 450} and (p.width, p.height) == (600, 450) and p.reasons == ["crop"], f"{box} {p.width}x{p.height} {p.reasons}")
+    p = plan(files["photo"], photo_constraints={"formats": ["png"]}, edits={"crop": crop, "aspect": "9:16"})
+    check("crop wins over aspect", p.crop is not None and (p.width, p.height) == (600, 450) and "aspect" not in p.reasons, f"{p.width}x{p.height} {p.reasons}")
+    p = plan(files["photo"], photo_constraints={"formats": ["png"]}, edits={"crop": {"x1": 0, "y1": 0, "x2": 1, "y2": 1}})
+    check("whole-image crop is a copy", p.action == "copy" and p.crop is None, f"{p.action} {p.reasons}")
+    for engine in ("pillow", "imagemagick"):
+        out = os.path.join(workdir, f"free_crop_{engine}.png")
+        export(files["photo"], out, engine=engine, photo_constraints={"formats": ["png"]}, edits={"crop": crop})
+        cropped = np.asarray(Image.open(out).convert("RGB"))
+        expected = source_pixels[90:540, 300:900]
+        check(f"{engine} crop rect exact", cropped.shape == expected.shape and np.array_equal(cropped, expected), str(cropped.shape))
+        # the oriented jpeg stores its pixels turned a quarter: the rectangle is read on the upright image
+        out = os.path.join(workdir, f"free_crop_oriented_{engine}.png")
+        export(files["oriented"], out, engine=engine, photo_constraints={"formats": ["png"]}, edits={"crop": crop})
+        upright = np.asarray(Image.open(out).convert("RGB"))
+        ssim = structural_similarity(expected, upright, channel_axis=2) if upright.shape == expected.shape else 0.0
+        check(f"{engine} crop on exif-oriented image", ssim > 0.9, f"{upright.shape} ssim={ssim:.3f}")
+        out = os.path.join(workdir, f"free_crop_anim_{engine}.gif")
+        export(files["animated"], out, engine=engine, photo_constraints={"formats": ["gif"]}, edits={"crop": crop})
+        with Image.open(out) as img:
+            check(f"{engine} animated crop keeps frames", img.size == (150, 113) and img.n_frames == 3, f"{img.size} frames={img.n_frames}")
+    ok, msg = loop.run_until_complete(expect_error(pipe.plan(input=files["photo"], config=PhotoConfig(preset="instagram_photo", edits={"crop": {"x1": 0, "y1": 0.45, "x2": 1, "y2": 0.55}})), "crop 1200x90 is not allowed"))
+    check("crop outside the preset's aspects loud", ok, msg)
+    ok, msg = loop.run_until_complete(expect_error(pipe.plan(input=files["photo"], config=PhotoConfig(photo_constraints={"formats": ["png"]}, edits={"crop": {"x1": 0.5, "y1": 0.5, "x2": 0.5001, "y2": 0.6}})), "keeps no pixels"))
+    check("sub-pixel crop loud", ok, msg)
+    try:
+        PhotoConfig(edits={"crop": {"x1": 0.6, "y1": 0, "x2": 0.4, "y2": 1}})
+        check("reversed crop refused", False, "accepted")
+    except ValueError as error:
+        check("reversed crop refused", "x1 < x2" in str(error), str(error).splitlines()[-1])
+
     took = time.perf_counter() - started
     print(f"\n{len(PASSED)} passed, {len(FAILED)} failed in {took:.1f}s")
     if FAILED:

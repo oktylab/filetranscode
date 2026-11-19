@@ -48,19 +48,39 @@ class PlanCodec(Node):
 ASPECT_TOLERANCE = 0.01
 
 
+def _check_aspect(effective: float, subject: str, limits) -> None:
+    if limits.aspects and all(abs(effective / aspect_of(allowed) - 1) > ASPECT_TOLERANCE for allowed in limits.aspects):
+        raise UnsatisfiableError(f"{subject} is not allowed; requires one of {', '.join(limits.aspects)}")
+    if (limits.min_aspect and effective < limits.min_aspect * (1 - ASPECT_TOLERANCE)) or (limits.max_aspect and effective > limits.max_aspect * (1 + ASPECT_TOLERANCE)):
+        raise UnsatisfiableError(f"{subject} is outside [{limits.min_aspect or 0:g}, {limits.max_aspect or math.inf:g}] (width:height)")
+
+
+def _crop_box(crop, width: int, height: int) -> CropPlan:
+    # every edge lands on an even pixel: 4:2:0 video keeps one color sample per 2x2 pixels, and its encoders refuse odd sizes
+    x, y = 2 * round(crop.x1 * width / 2), 2 * round(crop.y1 * height / 2)
+    right, bottom = min(2 * round(crop.x2 * width / 2), width // 2 * 2), min(2 * round(crop.y2 * height / 2), height // 2 * 2)
+    if right <= x or bottom <= y:
+        raise UnsatisfiableError(f"crop ({crop.x1:g}, {crop.y1:g}) to ({crop.x2:g}, {crop.y2:g}) keeps no pixels of the {width}x{height} frame")
+    return CropPlan(x=x, y=y, width=right - x, height=bottom - y)
+
+
 class PlanCrop(Node):
     async def __call__(self, ctx):
         config, plan = param(ctx, "config"), ctx.plan
-        limits, requested = config.video_constraints, config.edits.aspect
+        limits, edits = config.video_constraints, config.edits
+        if edits.crop:
+            # a crop rectangle wins over an aspect, which is then ignored
+            box = _crop_box(edits.crop, plan.width, plan.height)
+            _check_aspect(box.width / box.height, f"crop {box.width}x{box.height}", limits)
+            if (box.width, box.height) != (plan.width, plan.height):
+                plan.crop = box
+                plan.width, plan.height = box.width, box.height
+                plan.reasons.video.append("crop")
+            return ctx
+        requested = edits.aspect
         target = aspect_of(requested) if requested else None
         source = plan.width / plan.height
-        effective = target or source
-        if limits.aspects and all(abs(effective / aspect_of(allowed) - 1) > ASPECT_TOLERANCE for allowed in limits.aspects):
-            subject = f"aspect {requested}" if requested else f"source aspect {plan.width}:{plan.height}"
-            raise UnsatisfiableError(f"{subject} is not allowed; requires one of {', '.join(limits.aspects)}")
-        if (limits.min_aspect and effective < limits.min_aspect * (1 - ASPECT_TOLERANCE)) or (limits.max_aspect and effective > limits.max_aspect * (1 + ASPECT_TOLERANCE)):
-            subject = f"aspect {requested}" if requested else f"source aspect {plan.width}:{plan.height}"
-            raise UnsatisfiableError(f"{subject} is outside [{limits.min_aspect or 0:g}, {limits.max_aspect or math.inf:g}] (width:height)")
+        _check_aspect(target or source, f"aspect {requested}" if requested else f"source aspect {plan.width}:{plan.height}", limits)
         if target is None or abs(source / target - 1) <= ASPECT_TOLERANCE:
             return ctx
         if target < source:

@@ -36,7 +36,11 @@ class MoviePyEngine(Engine):
             raise ProbeError(path, str(error))
         if not infos.get("video_found"):
             raise ProbeError(path, "no video stream")
+        # VideoFileClip decodes the displayed picture (ffmpeg turns it upright), so a quarter turn swaps the stored size
+        rotation = int(infos.get("video_rotation") or 0) % 360
         width, height = infos["video_size"]
+        if rotation % 180 == 90:
+            width, height = height, width
         extension = os.path.splitext(str(data.raw_path or ""))[1].lstrip(".").lower()
         return VideoMetadata(
             size=data.size,
@@ -44,6 +48,7 @@ class MoviePyEngine(Engine):
             container=format_for_extension(extension),
             width=width,
             height=height,
+            rotation=rotation,
             fps=infos.get("video_fps"),
             duration=infos.get("video_duration") or infos.get("duration"),
             frame_count=infos.get("video_n_frames") or None,

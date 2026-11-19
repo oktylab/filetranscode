@@ -71,10 +71,28 @@ def _aspect_demand(limits) -> str:
     return " or ".join(parts)
 
 
+def _crop_box(crop, width: int, height: int) -> CropPlan:
+    x, y, right, bottom = round(crop.x1 * width), round(crop.y1 * height), round(crop.x2 * width), round(crop.y2 * height)
+    if right <= x or bottom <= y:
+        raise UnsatisfiableError(f"crop ({crop.x1:g}, {crop.y1:g}) to ({crop.x2:g}, {crop.y2:g}) keeps no pixels of the {width}x{height} image")
+    return CropPlan(x=x, y=y, width=right - x, height=bottom - y)
+
+
 class PlanCrop(Node):
     async def __call__(self, ctx):
         config, plan = param(ctx, "config"), ctx.plan
-        limits, requested = config.photo_constraints, config.edits.aspect
+        limits, edits = config.photo_constraints, config.edits
+        if edits.crop:
+            # a crop rectangle wins over an aspect, which is then ignored
+            box = _crop_box(edits.crop, plan.width, plan.height)
+            if not _aspect_allowed(box.width / box.height, limits):
+                raise UnsatisfiableError(f"crop {box.width}x{box.height} is not allowed; requires {_aspect_demand(limits)}")
+            if (box.width, box.height) != (plan.width, plan.height):
+                plan.crop = box
+                plan.width, plan.height = box.width, box.height
+                plan.reasons.append("crop")
+            return ctx
+        requested = edits.aspect
         target = aspect_of(requested) if requested else None
         source = plan.width / plan.height
         effective = target or source

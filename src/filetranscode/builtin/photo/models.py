@@ -1,6 +1,6 @@
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from ..toolkit.web import ui
 
@@ -62,7 +62,25 @@ class Filters(Model):
 
 ###########################################################################################################
 ###########################################################################################################
+class Crop(Model):
+    # the kept rectangle of the displayed image: left and right edges as fractions of its width, top and bottom of its height
+    x1: float = Field(ge=0, le=1)
+    y1: float = Field(ge=0, le=1)
+    x2: float = Field(ge=0, le=1)
+    y2: float = Field(ge=0, le=1)
+
+    @model_validator(mode="after")
+    def _ordered(self) -> "Crop":
+        if self.x2 <= self.x1 or self.y2 <= self.y1:
+            raise ValueError(f"crop ({self.x1:g}, {self.y1:g}) to ({self.x2:g}, {self.y2:g}) is empty; x1 < x2 and y1 < y2 are required")
+        return self
+
+
+###########################################################################################################
+###########################################################################################################
 class Edits(Model):
+    # a crop rectangle wins over aspect, which is then ignored
+    crop: Crop | None = None
     aspect: str | None = Field(default=None, json_schema_extra=ui(widget="aspect", choices=["9:16", "16:9", "1:1", "4:5", "2:3"]))
     background: str | None = Field(default=None, pattern=r"^#[0-9a-fA-F]{6}$")
     still: bool = False
