@@ -1,4 +1,7 @@
 """Fanout export battery: chunked export must match the single-pass export frame for frame, with trims and speed.
+A variable frame rate clip checks the timing itself: a fanout that keeps the frame timing must give every frame the
+single pass's timestamp, and one that resamples (capped rate, speed) must show at every grid point the source frame the
+fps filter's rule picks on one grid laid from the output's start, with nothing adding up across the chunks.
 
 Clips are generated locally (testsrc2 + a sine tone), nothing is downloaded. Each case runs `export` and `fanout`
 with the same config and compares: duration, frame count, codec/size/fps/pix_fmt, audio length and A/V start offset,
@@ -8,10 +11,12 @@ Run: .venv/bin/python develop/videotests/fanout.py <workdir>
 """
 import asyncio
 import json
+import math
 import os
 import subprocess
 import sys
 import time
+from fractions import Fraction
 
 import numpy as np
 
@@ -33,27 +38,34 @@ CLIPS = {
     "hevc_4k60": ("3840x2160", 60, 30, ["-c:v", "libx265", "-preset", "ultrafast", "-g", "300", "-x265-params", "log-level=error", "-tag:v", "hvc1"]),
 }
 
-# (clip, chunk_seconds, codecs, trim_start, trim_end, speed)
+CROP = {"x1": 0.1, "y1": 0.15, "x2": 0.65, "y2": 0.85}
+
+# (clip, chunk_seconds, codecs, trim_start, trim_end, speed, crop)
 CASES = [
-    ("h264_bf", 4, ["h264"], None, None, 1.0),
-    ("h264_bf", 4, ["h264"], 7.0, None, 1.0),
-    ("h264_bf", 4, ["h264"], None, 13.5, 1.0),
-    ("h264_bf", 4, ["h264"], 6.5, 8.5, 1.0),
-    ("h264_bf", 4, ["h264"], 6.0, 9.0, 1.0),
-    ("h264_bf", 4, ["h264"], 2.5, 16.25, 1.0),
-    ("h264_bf", 4, ["h264"], None, None, 1.5),
-    ("h264_bf", 4, ["h264"], None, None, 0.75),
-    ("h264_bf", 4, ["h264"], 2.5, 16.25, 1.5),
-    ("h264_bf", 4, ["h264"], 7.0, 13.5, 0.75),
-    ("h264_nobf", 4, ["h264"], None, None, 1.0),
-    ("h264_nobf", 4, ["h264"], 6.5, 8.5, 1.0),
-    ("h264_nobf", 4, ["h264"], None, None, 1.5),
-    ("h264_nobf", 4, ["h264"], 3.0, 17.0, 1.5),
-    ("h264_nobf", 4, ["h264"], None, None, 0.75),
-    ("h264_ntsc60_ts600", 3, ["hevc"], None, None, 1.0),
-    ("hevc_4k60", 8, ["h264"], None, None, 1.0),
-    ("hevc_4k60", 8, ["h264"], 4.25, 22.5, 1.0),
-    ("hevc_4k60", 8, ["hevc"], 4.25, 22.5, 1.5),
+    ("h264_bf", 4, ["h264"], None, None, 1.0, None),
+    ("h264_bf", 4, ["h264"], 7.0, None, 1.0, None),
+    ("h264_bf", 4, ["h264"], None, 13.5, 1.0, None),
+    ("h264_bf", 4, ["h264"], 6.5, 8.5, 1.0, None),
+    ("h264_bf", 4, ["h264"], 6.0, 9.0, 1.0, None),
+    ("h264_bf", 4, ["h264"], 2.5, 16.25, 1.0, None),
+    ("h264_bf", 4, ["h264"], None, None, 1.5, None),
+    ("h264_bf", 4, ["h264"], None, None, 0.75, None),
+    ("h264_bf", 4, ["h264"], 2.5, 16.25, 1.5, None),
+    ("h264_bf", 4, ["h264"], 7.0, 13.5, 0.75, None),
+    ("h264_nobf", 4, ["h264"], None, None, 1.0, None),
+    ("h264_nobf", 4, ["h264"], 6.5, 8.5, 1.0, None),
+    ("h264_nobf", 4, ["h264"], None, None, 1.5, None),
+    ("h264_nobf", 4, ["h264"], 3.0, 17.0, 1.5, None),
+    ("h264_nobf", 4, ["h264"], None, None, 0.75, None),
+    ("h264_ntsc60_ts600", 3, ["hevc"], None, None, 1.0, None),
+    ("hevc_4k60", 8, ["h264"], None, None, 1.0, None),
+    ("hevc_4k60", 8, ["h264"], 4.25, 22.5, 1.0, None),
+    ("hevc_4k60", 8, ["hevc"], 4.25, 22.5, 1.5, None),
+    # a crop rectangle off the center: every chunk exports the plan's one rectangle, with trims and speed rebased as without it
+    ("h264_bf", 4, ["h264"], None, None, 1.0, CROP),
+    ("h264_bf", 4, ["h264"], 2.5, 16.25, 1.5, CROP),
+    ("h264_ntsc60_ts600", 3, ["hevc"], None, None, 1.0, CROP),
+    ("hevc_4k60", 8, ["h264"], 4.25, 22.5, 1.0, CROP),
 ]
 
 
@@ -95,8 +107,8 @@ def silences(path: str) -> list[str]:
     return [line.strip() for line in result.stderr.splitlines() if "silence_start" in line]
 
 
-def frames(path: str, first: int, last: int, width: int, height: int) -> list[np.ndarray]:
-    raw = subprocess.run(["ffmpeg", "-v", "error", "-i", path, "-vf", f"select=between(n\\,{first}\\,{last})", "-fps_mode", "passthrough", "-f", "rawvideo", "-pix_fmt", "gray", "-"], capture_output=True, check=True).stdout
+def frames(path: str, first: int, last: int, width: int, height: int, vf: str = "") -> list[np.ndarray]:
+    raw = subprocess.run(["ffmpeg", "-v", "error", "-i", path, "-vf", f"{vf + ',' if vf else ''}select=between(n\\,{first}\\,{last})", "-fps_mode", "passthrough", "-f", "rawvideo", "-pix_fmt", "gray", "-"], capture_output=True, check=True).stdout
     return [np.frombuffer(raw[i:i + width * height], dtype=np.uint8).reshape(height, width) for i in range(0, len(raw), width * height)]
 
 
@@ -115,20 +127,23 @@ async def split_export_merge(pipe, source: str, workdir: str, label: str, config
     # fanout's steps as separate calls, the way separate machines run them: only paths and plans cross between them
     folder = os.path.join(workdir, f"{label}_chunks")
     plan = await pipe.plan(input=source, config=config)
-    chunks = await pipe.split(input=source, output=os.path.join(folder, "part.mp4"), config=config, chunk_seconds=chunk_seconds, plan=plan)
-    durations = [(await pipe.probe(input=chunk))[0].duration for chunk in chunks]
+    split = await pipe.split(input=source, output=os.path.join(folder, "part.mp4"), config=config, chunk_seconds=chunk_seconds, plan=plan)
+    chunks, durations = [chunk.output for chunk in split], [chunk.duration for chunk in split]
     exported = [
         await pipe.export(input=chunk, output=os.path.join(folder, f"out_{index:03d}.mp4"), config=config, plan=chunk_plan)
         for index, (chunk, chunk_plan) in enumerate(zip(chunks, chunk_plans(plan, durations))) if chunk_plan
     ]
     actual = os.path.join(workdir, f"{label}_split.mp4")
-    await pipe.merge(inputs=exported, output=actual, input=source, plan=plan)
+    await pipe.merge(inputs=exported, output=actual, input=source, plan=plan, durations=durations)
     return actual
 
 
-async def run_case(pipe, source: str, workdir: str, label: str, chunk_seconds: float, codecs: list[str], start, end, speed) -> None:
+async def run_case(pipe, source: str, workdir: str, label: str, chunk_seconds: float, codecs: list[str], start, end, speed, crop) -> None:
     print(f"== {label}")
-    config = VideoConfig(video_constraints=VideoConstraints(codecs=codecs), edits=Edits(trim_start=start, trim_end=end, speed=speed))
+    config = VideoConfig(video_constraints=VideoConstraints(codecs=codecs), edits=Edits(trim_start=start, trim_end=end, speed=speed, crop=crop))
+    box = (await pipe.plan(input=source, config=config)).crop
+    # source frames are compared through the plan's own rectangle
+    cut = f"crop={box.width}:{box.height}:{box.x}:{box.y}" if box else ""
     expected = os.path.join(workdir, f"{label}_export.mp4")
     actual = os.path.join(workdir, f"{label}_fanout.mp4")
     began = time.time()
@@ -151,7 +166,7 @@ async def run_case(pipe, source: str, workdir: str, label: str, chunk_seconds: f
     # first frame: the source frame the trim start names (speed leaves the first frame alone); last frame: the single pass's
     fps = probe(source)["fps"]
     first_index = round((start or 0.0) * fps)
-    candidates = frames(source, max(first_index - 2, 0), first_index + 2, want["width"], want["height"]) if (want["width"], want["height"]) == (got["width"], got["height"]) else []
+    candidates = frames(source, max(first_index - 2, 0), first_index + 2, want["width"], want["height"], cut) if (want["width"], want["height"]) == (got["width"], got["height"]) else []
     first_got = frames(actual, 0, 0, got["width"], got["height"])[0]
     first_want = frames(expected, 0, 0, want["width"], want["height"])[0]
     index, score = nearest(first_got, candidates, max(first_index - 2, 0))
@@ -164,7 +179,7 @@ async def run_case(pipe, source: str, workdir: str, label: str, chunk_seconds: f
     check(f"{label} last frame matches export", psnr(last_got, last_want) >= 28, f"{psnr(last_got, last_want):.1f} dB")
     if speed == 1.0:
         last_index = round((end if end is not None else probe(source)["duration"]) * fps) - 1
-        candidates = frames(source, last_index - 2, last_index + 2, want["width"], want["height"])
+        candidates = frames(source, last_index - 2, last_index + 2, want["width"], want["height"], cut)
         index, score = nearest(last_got, candidates, last_index - 2)
         check(f"{label} last frame is source frame {last_index}", index == last_index and score >= min(28, nearest(last_want, candidates, 0)[1] - 1), f"nearest source frame {index} at {score:.1f} dB")
     separate = await split_export_merge(pipe, source, workdir, label, config, chunk_seconds)
@@ -181,15 +196,93 @@ async def run_case(pipe, source: str, workdir: str, label: str, chunk_seconds: f
                  f"{offset_want:.4f}/{offset_got:.4f}", str(len(quiet)), f"{psnr(first_got, first_want):.1f}/{psnr(last_got, last_want):.1f}", f"{single:.0f}s/{chunked:.0f}s"))
 
 
+VFR_CROP = {"x1": 0.1, "y1": 0.1, "x2": 0.9, "y2": 0.9}
+# (label, chunk_seconds, config): one second chunks, so twenty joins would show any rounding that adds up
+VFR_CASES = [
+    ("vfr_keep_timing", 1, {"edits": {"crop": VFR_CROP}}),
+    ("vfr_keep_timing_trim", 1, {"edits": {"crop": VFR_CROP, "trim_start": 3.3, "trim_end": 16.7}}),
+    ("vfr_cap24", 1, {"video_constraints": {"max_fps": 24}, "edits": {"crop": VFR_CROP}}),
+    ("vfr_cap24_trim", 1, {"video_constraints": {"max_fps": 24}, "edits": {"crop": VFR_CROP, "trim_start": 3.3, "trim_end": 16.7}}),
+    ("vfr_speed1.5", 1, {"edits": {"crop": VFR_CROP, "speed": 1.5}}),
+]
+
+
+def generate_vfr(workdir: str) -> str:
+    # a 60 fps source with about half its frames dropped at random: irregular gaps, B-frames, a 600 timescale like phones
+    path = os.path.join(workdir, "vfr.mp4")
+    if not os.path.exists(path):
+        sh(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc2=size=320x180:rate=60", "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000", "-t", "20",
+            "-vf", "select='gt(random(1),0.5)'", "-fps_mode", "vfr", "-c:v", "libx264", "-preset", "veryfast", "-g", "30", "-pix_fmt", "yuv420p",
+            "-c:a", "aac", "-b:a", "96k", "-video_track_timescale", "600", path])
+    return path
+
+
+def frame_times(path: str) -> list[float]:
+    out = sh(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "packet=pts_time", "-of", "csv=p=0", path]).stdout
+    times = sorted(float(value) for value in out.split() if value not in ("", "N/A"))
+    return [time - times[0] for time in times]
+
+
+def all_frames(path: str, width: int, height: int, vf: str = "") -> np.ndarray:
+    raw = subprocess.run(["ffmpeg", "-v", "error", "-i", path, "-fps_mode", "passthrough", *(["-vf", vf] if vf else []), "-f", "rawvideo", "-pix_fmt", "gray", "-"], capture_output=True, check=True).stdout
+    return np.frombuffer(raw, np.uint8).reshape(-1, height, width).astype(np.float64)
+
+
+def picks(output: np.ndarray, source: np.ndarray, guesses: list[int]) -> list[int]:
+    # the source frame each output frame shows: the closest one around where the ideal grid puts it
+    return [low + int(np.argmin([np.mean((frame - candidate) ** 2) for candidate in source[low:guess + 4]]))
+            for frame, guess in zip(output, guesses) for low in [max(guess - 4, 0)]]
+
+
+async def run_vfr_case(pipe, source: str, workdir: str, label: str, chunk_seconds: float, config_data: dict) -> None:
+    print(f"== {label}")
+    config = VideoConfig(**config_data)
+    plan = await pipe.plan(input=source, config=config)
+    expected, actual = os.path.join(workdir, f"{label}_export.mp4"), os.path.join(workdir, f"{label}_fanout.mp4")
+    await pipe.export(input=source, output=expected, config=config)
+    await pipe.fanout(input=source, output=actual, config=config, chunk_seconds=chunk_seconds)
+    separate = await split_export_merge(pipe, source, workdir, label, config, chunk_seconds)
+    resampled = "fps" in plan.reasons.video or plan.speed != 1.0
+    if not resampled:
+        want = frame_times(expected)
+        for name, path in (("fanout", actual), ("split/merge", separate)):
+            got = frame_times(path)
+            worst = max((abs(a - b) for a, b in zip(want, got)), default=0.0)
+            check(f"{label} {name} keeps every frame's timestamp", len(got) == len(want) and worst < 0.001, f"{len(got)} frames vs {len(want)}, worst {worst * 1000:.1f} ms")
+        return
+    # the grid the fps filter lays from the output's start, and the source frame its rule shows at each point: the
+    # last frame whose time rounds to that point or before (the first kept frame fills any point ahead of it)
+    rate = float(Fraction(plan.fps).limit_denominator(1001))
+    start, end = plan.trim_start or 0.0, plan.trim_end if plan.trim_end is not None else math.inf
+    times = frame_times(source)
+    kept = [index for index, time in enumerate(times) if start - 1e-9 <= time < end]
+    slots = [round((times[index] - start) / plan.speed * rate) for index in kept]
+    count = round((min(times[-1] + (times[-1] - times[-2]), end) - start) / plan.speed * rate)
+    ideal = [kept[max((i for i, slot in enumerate(slots) if slot <= n), default=0)] for n in range(count)]
+    box = plan.crop
+    source_frames = all_frames(source, box.width, box.height, f"crop={box.width}:{box.height}:{box.x}:{box.y}")
+    for name, path in (("fanout", actual), ("split/merge", separate)):
+        out = all_frames(path, plan.width, plan.height)
+        check(f"{label} {name} frame count is the grid's", abs(len(out) - count) <= 1, f"{len(out)} frames, grid {count}")
+        got = picks(out, source_frames, ideal)
+        off = [g - i for g, i in zip(got, ideal)]
+        check(f"{label} {name} shows the grid's source frame everywhere", all(abs(o) <= 0 for o in off), str({k: off.count(k) for k in sorted(set(off))}))
+
+
 async def main_async(workdir: str) -> None:
     pipe = VideoPipeline()
     clips = generate(workdir)
     only = sys.argv[2:]
-    for clip, chunk_seconds, codecs, start, end, speed in CASES:
-        label = f"{clip}_{codecs[0]}_c{chunk_seconds:g}_{start if start is not None else 'x'}-{end if end is not None else 'x'}_s{speed:g}"
+    vfr = generate_vfr(workdir)
+    for label, chunk_seconds, config_data in VFR_CASES:
         if only and not any(token in label for token in only):
             continue
-        await run_case(pipe, clips[clip], workdir, label, chunk_seconds, codecs, start, end, speed)
+        await run_vfr_case(pipe, vfr, workdir, label, chunk_seconds, config_data)
+    for clip, chunk_seconds, codecs, start, end, speed, crop in CASES:
+        label = f"{clip}_{codecs[0]}_c{chunk_seconds:g}_{start if start is not None else 'x'}-{end if end is not None else 'x'}_s{speed:g}{'_crop' if crop else ''}"
+        if only and not any(token in label for token in only):
+            continue
+        await run_case(pipe, clips[clip], workdir, label, chunk_seconds, codecs, start, end, speed, crop)
 
 
 def main() -> int:

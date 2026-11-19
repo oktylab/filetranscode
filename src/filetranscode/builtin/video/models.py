@@ -1,4 +1,4 @@
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -233,10 +233,32 @@ class ExportPlan(BaseModel):
     frame_image: str | None = None
     frame_image_at: Literal["first", "last"] = "last"
     frame_image_frames: int = 1
+    # set by chunk_plans on a fanout chunk's plan, None on every other: how long the chunk lasts in the merged output,
+    # and for an export that resamples, the exact count of the output grid's frames it delivers, the first one
+    # first_frame_at seconds after its own start
+    length: float | None = None
+    frames: int | None = None
+    first_frame_at: float | None = None
 
 
 ###########################################################################################################
 ###########################################################################################################
+class Chunk(Model):
+    output: Any
+    # the source time the chunk covers, from its first frame to the next chunk's (the last one to the source's end),
+    # as the cut found it: a chunk file's own length ends at its last frame and misses the gap to the next one
+    duration: float
+
+
+###########################################################################################################
+###########################################################################################################
+def resamples(plan: "ExportPlan") -> bool:
+    """Whether the export puts the frames on a new constant rate grid: the rate is capped or the speed changes. Decided
+    by the plan, made against the whole source, never by a chunk's own measured rate: a variable rate source's chunks
+    each measure a different one."""
+    return bool(plan.fps) and ("fps" in plan.reasons.video or plan.speed != 1.0)
+
+
 def trimmed_duration(plan: "ExportPlan", metadata: "VideoMetadata") -> float | None:
     if plan.trim_start is not None or plan.trim_end is not None:
         window = (plan.trim_end or metadata.duration or 0.0) - (plan.trim_start or 0.0)

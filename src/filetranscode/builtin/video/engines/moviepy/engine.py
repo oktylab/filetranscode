@@ -1,5 +1,7 @@
 import math
 import os
+import re
+import subprocess
 
 from moviepy import VideoFileClip, afx, concatenate_videoclips, vfx
 from moviepy.config import FFMPEG_BINARY
@@ -14,6 +16,18 @@ from ...css import transform
 from ...rate import traits_of
 from ..ffmpeg.rate import rate_args
 from ..encoders import pick_encoder
+
+
+###########################################################################################################
+###########################################################################################################
+SAR = re.compile(r"Video: .*?\bSAR (\d+):(\d+)")
+
+
+def _sar(path: str) -> float:
+    # moviepy's parser leaves the pixel aspect out; ffmpeg prints it on the video stream line
+    match = SAR.search(subprocess.run([FFMPEG_BINARY, "-hide_banner", "-i", path], capture_output=True, text=True).stderr)
+    numerator, denominator = (int(match.group(1)), int(match.group(2))) if match else (1, 1)
+    return numerator / denominator if numerator and denominator else 1.0
 
 
 ###########################################################################################################
@@ -38,7 +52,10 @@ class MoviePyEngine(Engine):
             raise ProbeError(path, "no video stream")
         # VideoFileClip decodes the displayed picture (ffmpeg turns it upright), so a quarter turn swaps the stored size
         rotation = int(infos.get("video_rotation") or 0) % 360
+        sar = _sar(path)
         width, height = infos["video_size"]
+        if sar != 1.0:
+            width = 2 * round(width * sar / 2)
         if rotation % 180 == 90:
             width, height = height, width
         extension = os.path.splitext(str(data.raw_path or ""))[1].lstrip(".").lower()
@@ -49,6 +66,7 @@ class MoviePyEngine(Engine):
             width=width,
             height=height,
             rotation=rotation,
+            sar=sar,
             fps=infos.get("video_fps"),
             duration=infos.get("video_duration") or infos.get("duration"),
             frame_count=infos.get("video_n_frames") or None,
@@ -71,6 +89,9 @@ class MoviePyEngine(Engine):
             out = clip
             if plan.trim_start is not None or plan.trim_end is not None:
                 out = out.subclipped(plan.trim_start or 0, plan.trim_end or clip.duration)
+            if metadata.sar != 1.0:
+                # VideoFileClip decodes the stored pixels: they take the displayed shape first, as in the ffmpeg engine
+                out = out.resized((metadata.width, metadata.height))
             if plan.crop:
                 out = out.cropped(x1=plan.crop.x, y1=plan.crop.y, width=plan.crop.width, height=plan.crop.height)
             if plan.speed != 1.0:
@@ -101,10 +122,15 @@ class MoviePyEngine(Engine):
         chunks: list[OutputData] = []
         with VideoFileClip(ctx.input[0].path) as clip:
             count = max(1, math.ceil(clip.duration / seconds))
+            # the cuts are exact times, so each chunk covers exactly its section
+            ctx.spans = [min((index + 1) * seconds, clip.duration) - index * seconds for index in range(count)]
             for index in range(count):
                 data = OutputData()
                 path = data.temp(suffix=f".{extension}")
                 section = clip.subclipped(index * seconds, min((index + 1) * seconds, clip.duration))
+                if metadata.sar != 1.0:
+                    # chunks carry square pixels at the displayed size, which the plan's crop and size are measured on
+                    section = section.resized((metadata.width, metadata.height))
                 section.write_videofile(path, codec=encoder, logger=None)
                 data.path = path
                 chunks.append(data)
@@ -121,7 +147,8 @@ class MoviePyEngine(Engine):
         format = format_for_extension(extension) or "mp4"
         encoder = pick_encoder(FFMPEG_BINARY, traits_of(infos.get("video_codec_name") or "h264").encoders)
         clips = [VideoFileClip(data.path) for data in chunks]
-        merged = concatenate_videoclips(clips)
+        # placed by the length each plan gives, as in the ffmpeg engine
+        merged = concatenate_videoclips([clip.with_duration(length) for clip, length in zip(clips, ctx.lengths)] if ctx.lengths else clips)
         delivered = OutputData()
         path = delivered.temp(suffix=f".{format_of(format).extension}")
         merged.write_videofile(path, codec=encoder, logger=None)

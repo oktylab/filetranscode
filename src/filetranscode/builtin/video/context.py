@@ -17,3 +17,6 @@ class VideoContext(BaseModel):
     metadata: Probed[VideoMetadata] = Probed()
     plan: ExportPlan | None = None
     probe: Literal["before", "after"] = "before"
+    # split: the source time each chunk covers; merge: how long each merged chunk lasts in the output
+    spans: list[float] = []
+    lengths: list[float] = []

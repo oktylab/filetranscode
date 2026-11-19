@@ -1,4 +1,5 @@
 import asyncio
+import csv
 import json
 import os
 import shutil
@@ -212,12 +213,21 @@ class FfmpegEngine(Engine):
         workdir = tempfile.mkdtemp()
         try:
             pattern = os.path.join(workdir, f"chunk_%03d.{extension}")
-            # chunks cut for an export plan carry video only: merge restores the soundtrack from the source
+            listing = os.path.join(workdir, "chunks.csv")
+            # chunks cut for an export plan carry video only: merge restores the soundtrack from the source. The list
+            # gives each chunk's start and end on the source's timeline, where the next chunk's first frame sits.
             await _run([
                 BINARY, "-y", *_input_args(ctx.input[0].path), "-i", ctx.input[0].path, "-map", "0:v:0" if ctx.plan else "0", "-c", "copy",
-                "-f", "segment", "-segment_time", str(ctx.params.chunk_seconds),
+                "-f", "segment", "-segment_time", str(ctx.params.chunk_seconds), "-segment_list", listing, "-segment_list_type", "csv",
                 "-segment_format", format, "-reset_timestamps", "1", pattern,
             ])
+            with open(listing) as handle:
+                bounds = [(float(start), float(stop)) for _, start, stop in csv.reader(handle)]
+            # the list's later starts are their keyframes' times on the muxer's timeline, shifted ahead of a B-frame
+            # stream's decode delay; the first one is written as 0, so it is read off the first chunk itself
+            first = await asyncio.to_thread(subprocess.run, [PROBE_BINARY, "-v", "error", "-show_entries", "format=start_time", "-of", "csv=p=0", pattern % 0], capture_output=True, text=True)
+            starts = [float(first.stdout.strip() or 0), *(start for start, _ in bounds[1:])]
+            ctx.spans = [following - start for start, following in zip(starts, [*starts[1:], bounds[-1][1]])]
             chunks = []
             for path in sorted(glob(os.path.join(workdir, f"chunk_*.{extension}"))):
                 data = OutputData()
@@ -240,7 +250,11 @@ class FfmpegEngine(Engine):
         delivered = OutputData()
         listing = delivered.temp(suffix=".txt")
         with open(listing, "w") as handle:
-            handle.writelines(f"file '{data.path}'\n" for data in chunks)
+            for index, data in enumerate(chunks):
+                handle.write(f"file '{data.path}'\n")
+                if ctx.lengths:
+                    # placed by the length its plan gives: a chunk file ends at its last frame, short of the next chunk's start
+                    handle.write(f"duration {ctx.lengths[index]:.6f}\n")
         # the concat demuxer refuses non-file protocols in its listed entries unless
         # explicitly whitelisted, so a remote-URL resolver (e.g. a presigned S3 GET)
         # needs this even though ffmpeg allows the same URL directly as a top-level -i

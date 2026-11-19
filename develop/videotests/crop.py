@@ -121,8 +121,8 @@ async def crop_case(pipe, source: str, workdir: str, label: str, engine: str) ->
         return
     x, y, w, h = box
     reference = f"scale={width}:{height},setsar=1,crop={w}:{h}:{x}:{y}"
-    # the pyav engine delivers two frames fewer than the source on every encode, so the last frame is the last delivered one
-    for index in (0, 45, int(delivered["nb_read_frames"]) - 1):
+    check(f"{label} keeps every frame", int(delivered["nb_read_frames"]) == 90, f"{delivered['nb_read_frames']} of 90")
+    for index in (0, 45, 89):
         score = psnr(frame(out, index, w, h), frame(source, index, w, h, reference))
         check(f"{label} frame {index} is the source rectangle", score >= 30, f"{score:.1f} dB")
     # the same frame cut 8 pixels to the side scores far lower, so the PSNR above cannot pass on a misplaced rectangle
@@ -139,9 +139,6 @@ async def main_async(workdir: str) -> None:
         for name, source in clips.items():
             label = f"{engine}_{name}"
             if only and not any(token in label for token in only):
-                continue
-            if engine == "moviepy" and name == "h264_sar":
-                # moviepy decodes the stored pixels and writes square ones, dropping the pixel aspect on every export
                 continue
             print(f"== {label}")
             try:

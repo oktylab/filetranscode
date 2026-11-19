@@ -203,7 +203,9 @@ class PyAvEngine(Engine):
             if start:
                 source.seek(int(start * av.time_base))
             for packet in source.demux([stream for stream in (video_in, audio_in) if stream is not None]):
-                if packet.dts is None:
+                # each stream ends on an empty packet (no dts): it carries nothing to copy, but decoding it flushes the
+                # frames a decoder still holds (B-frame reordering keeps the last ones back)
+                if packet.dts is None and packet.stream is not video_in and resampler is None:
                     continue
                 if end is not None and packet.pts is not None and float(packet.pts * packet.time_base) > end + 2:
                     break
@@ -258,7 +260,8 @@ class PyAvEngine(Engine):
             audio_stream, resampler, fifo = audio_out(sink, plan, audio_in)
             shaper = audio_graph(audio_in, plan) if resampler is not None else None
             for packet in source.demux([stream for stream in (video_in, audio_in) if stream is not None]):
-                if packet.dts is None:
+                # the empty end packet (no dts) carries nothing to copy; a decoded stream still needs it to flush its decoder
+                if packet.dts is None and (packet.stream is video_in or resampler is None):
                     continue
                 if packet.stream is video_in:
                     packet.stream = video_out
@@ -292,9 +295,12 @@ class PyAvEngine(Engine):
             mapping: dict = {}
             offsets: dict = {}
             boundary = 0.0
+            starts, end = [], 0.0
             for packet in source.demux(streams):
                 if packet.dts is None:
                     continue
+                if packet.stream is video and packet.pts is not None:
+                    end = max(end, float((packet.pts + (packet.duration or 0)) * packet.time_base))
                 if packet.stream is video and packet.is_keyframe and (sink is None or float(packet.dts * packet.time_base) >= boundary):
                     if sink is not None:
                         sink.close()
@@ -307,6 +313,7 @@ class PyAvEngine(Engine):
                     mapping = {stream: sink.add_stream_from_template(stream) for stream in streams}
                     offsets = {}
                     segment_start = (packet.pts if packet.pts is not None else packet.dts) * packet.time_base
+                    starts.append(float(segment_start))
                 if sink is None:
                     continue
                 offset = offsets.setdefault(packet.stream, int(segment_start / packet.stream.time_base))
@@ -316,6 +323,8 @@ class PyAvEngine(Engine):
                 sink.mux(packet)
             if sink is not None:
                 sink.close()
+        # each chunk covers the source from its first frame to the next chunk's, the last one to the source's end
+        ctx.spans = [following - start for start, following in zip(starts, [*starts[1:], end])]
         ctx.output += chunks
         return ctx
 
@@ -329,7 +338,11 @@ class PyAvEngine(Engine):
         delivered = OutputData()
         listing = delivered.temp(suffix=".txt")
         with open(listing, "w") as handle:
-            handle.writelines(f"file '{data.path}'\n" for data in chunks)
+            for index, data in enumerate(chunks):
+                handle.write(f"file '{data.path}'\n")
+                if ctx.lengths:
+                    # placed by the length its plan gives, as in the ffmpeg engine
+                    handle.write(f"duration {ctx.lengths[index]:.6f}\n")
         buffer = io.BytesIO()
         with av.open(listing, format="concat", options={"safe": "0"}) as source, av.open(buffer, "w", format=format) as sink:
             streams = [stream for stream in source.streams if stream.type in ("video", "audio")]

@@ -1,8 +1,10 @@
+from fractions import Fraction
+
 import av
 import av.error
 
 from ...css import avfilter_stages
-from ...models import atempo_factors
+from ...models import atempo_factors, resamples
 
 
 ###########################################################################################################
@@ -25,8 +27,13 @@ def video_steps(plan, metadata) -> list[tuple[str, str]]:
         steps.append(("scale", f"{plan.width}:{plan.height}"))
     if plan.speed != 1.0:
         steps.append(("setpts", f"PTS/{plan.speed:g}"))
-    if plan.fps and (plan.fps != metadata.fps or plan.speed != 1.0):
-        steps.append(("fps", f"{plan.fps:g}"))
+    if resamples(plan):
+        rate = Fraction(plan.fps).limit_denominator(1001)
+        if plan.frames is None:
+            steps.append(("fps", f"{rate}"))
+        else:
+            # a fanout chunk takes its share of the whole output's grid, as in the ffmpeg engine
+            steps += [("fps", f"fps={rate}:start_time={plan.first_frame_at:.6f}:eof_action=pass"), ("tpad", "stop_mode=clone:stop=1"), ("trim", f"end_frame={plan.frames}"), ("setpts", "PTS-STARTPTS")]
     steps += avfilter_stages(plan.color, plan.height, plan.pix_fmt, metadata)
     return steps
 

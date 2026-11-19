@@ -1,7 +1,7 @@
 from fractions import Fraction
 
 from ...css import avfilter_stages
-from ...models import atempo_factors
+from ...models import atempo_factors, resamples
 
 
 ###########################################################################################################
@@ -17,9 +17,16 @@ def video_filters(plan, metadata) -> list[str]:
         steps.append(f"scale={plan.width}:{plan.height}")
     if plan.speed != 1.0:
         steps.append(f"setpts=PTS/{plan.speed:g}")
-    if plan.fps and (plan.fps != metadata.fps or plan.speed != 1.0):
-        # an exact rate (60000/1001, not the 59.9401 :g prints), so every fanout chunk gets the time base the unfiltered ones keep
-        steps.append(f"fps={Fraction(plan.fps).limit_denominator(1001)}")
+    if resamples(plan):
+        # an exact rate (60000/1001, not the 59.9401 :g prints), so every fanout chunk gets the same time base
+        rate = Fraction(plan.fps).limit_denominator(1001)
+        if plan.frames is None:
+            steps.append(f"fps={rate}")
+        else:
+            # a fanout chunk takes its share of the whole output's grid: the grid's phase at its start, then exactly its
+            # frame count. Its file ends at its last frame, short of the next chunk's start, so the last frame is passed
+            # on at the end instead of rounded away, and the clone fills a grid point the end still leaves
+            steps += [f"fps={rate}:start_time={plan.first_frame_at:.6f}:eof_action=pass", "tpad=stop_mode=clone:stop=1", f"trim=end_frame={plan.frames}", "setpts=PTS-STARTPTS"]
     steps += [f"{name}={escape(args)}" for name, args in avfilter_stages(plan.color, plan.height, plan.pix_fmt, metadata)]
     return steps
 
