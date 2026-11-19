@@ -122,18 +122,21 @@ class PlanGeometry(Node):
 ###########################################################################################################
 class PlanFrameRate(Node):
     async def __call__(self, ctx):
-        plan, limits, metadata = ctx.plan, param(ctx, "config").video_constraints, ctx.metadata.before[0]
+        config, plan, metadata = param(ctx, "config"), ctx.plan, ctx.metadata.before[0]
+        limits = config.video_constraints
         if plan.fps is None:
             return ctx
         # platforms count the frames that are there, so the limits are checked at the lower of the declared and the
-        # average rate (a clip declaring 30/1 that averages 20 is raised to min_fps); a clip within them keeps its own
-        # rate, the one every frame the export adds (a cover) must run on
+        # average rate (a clip declaring 30/1 that averages 20 is raised to min_fps). A clip kept on its own timing keeps
+        # its declared rate, the one every frame the export adds (a cover) must run on; a new constant rate grid (a capped
+        # rate, a speed change) is laid at the measured rate instead, as a declared rate can be a timestamp artifact
         measured = min(plan.fps, metadata.average_fps or plan.fps)
         clamped = min(measured, limits.max_fps or measured)
         clamped = max(clamped, limits.min_fps or clamped)
         if clamped != measured:
-            plan.fps = clamped
             plan.reasons.video.append("fps")
+        if clamped != measured or config.edits.speed != 1.0:
+            plan.fps = clamped
         return ctx
 
 
